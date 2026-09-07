@@ -73,13 +73,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![commands::app::app_info])
         .build(tauri::generate_context!())
         .expect("error while building Nostra")
-        .run(|app, event| match event {
+        .run(|_app, event| match event {
             // Dock-click fallback: the frontend shows the window on mount, but
             // if that path ever fails the user must not be left with a hidden
-            // window and a dead dock icon.
+            // window and a dead dock icon. Non-macOS builds compile this arm
+            // out, leaving _app unused there (underscore prefix covers both).
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { .. } => {
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = _app.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
                 }

@@ -4,3 +4,16 @@ pnpm-lock.yaml
 src-tauri/target
 src-tauri/gen
 src-tauri/icons
+
+# Local-only directories excluded from git via .git/info/exclude; they are
+# not deliverables and must not participate in format gating.
+.trellis
+.claude
+.agents
+.codebuddy
+.codex
+.cursor
+.pi
+.qoder
+.zcode
+myNotes
