@@ -1,3 +1,5 @@
+import type { KeyboardEvent } from "react";
+
 import { cn } from "cn";
 import { Star, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -14,11 +16,12 @@ interface SessionRowProps {
   session: MockSession;
 }
 
-// Layering, outermost first: the row button (title, truncated), then the
-// hover fade ramp (pointer-events-none, DOM after the button so it paints
-// over the title), then the action cluster (paints over the ramp and stays
-// clickable). The ramp lives outside the button so the row itself remains
-// a single valid button element.
+// The row is one div[role=button] carrying the hover tint itself; the title
+// fade ramp and the action cluster are its children bound via
+// group-hover/row, so background, ramp, and buttons always share a single
+// hover state. A real button element cannot contain the nested star/delete
+// buttons, hence role=button with manual keyboard handling; the action
+// buttons stop propagation so clicking them never selects the row.
 export function SessionRow({
   isActive,
   onDelete,
@@ -28,31 +31,50 @@ export function SessionRow({
 }: SessionRowProps) {
   const { t } = useTranslation();
 
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
+    // Nested buttons keep their own keyboard handling; their keydown events
+    // bubble here, so only the row itself triggers selection.
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      // Prevent Space from scrolling the sidebar list.
+      event.preventDefault();
+      onSelect();
+    }
+  }
+
   return (
     <div
+      aria-current={isActive ? "true" : undefined}
+      aria-label={session.title}
       className={cn(
-        "session-row group/row relative",
-        isActive && "session-row-selected",
+        "text-sidebar-foreground group/row focus-visible:ring-ring/50 relative flex h-8 items-center rounded-[6px] px-2 text-sm outline-none focus-visible:ring-3",
+        // Selected rows keep their tint while hovered or focused, so they
+        // drop the hover/focus background classes entirely.
+        isActive
+          ? "session-row-selected"
+          : "focus-within:bg-sidebar-accent hover:bg-sidebar-accent",
       )}
+      onClick={onSelect}
+      onKeyDown={handleKeyDown}
+      role="button"
+      tabIndex={0}
     >
-      <button
-        aria-current={isActive ? "true" : undefined}
-        className="session-row-button text-sidebar-foreground flex h-8 w-full items-center rounded-[6px] px-2 text-left text-sm"
-        onClick={onSelect}
-        type="button"
-      >
-        <span className="min-w-0 flex-1 truncate">{session.title}</span>
-      </button>
+      <span className="min-w-0 flex-1 truncate">{session.title}</span>
       <div
         aria-hidden="true"
-        className="session-fade pointer-events-none invisible absolute inset-y-0 right-0 w-[98px] rounded-[6px] group-hover/row:visible"
+        className="session-fade pointer-events-none invisible absolute inset-y-0 right-0 w-[98px] rounded-[6px] group-focus-within/row:visible group-hover/row:visible"
       />
-      <div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100">
+      <div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100">
         <Button
           aria-label={t(
             session.starred ? "sessions.unfavorite" : "sessions.favorite",
           )}
-          onClick={onToggleStar}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleStar();
+          }}
           size="icon-xs"
           variant="ghost"
         >
@@ -67,7 +89,10 @@ export function SessionRow({
         </Button>
         <Button
           aria-label={t("sessions.delete")}
-          onClick={onDelete}
+          onClick={(event) => {
+            event.stopPropagation();
+            onDelete();
+          }}
           size="icon-xs"
           variant="ghost"
         >

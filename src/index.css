@@ -175,15 +175,15 @@
 
 /* Session-row surfaces and the title fade ramp are declared together so the
    ramp's solid zone always matches the row's current background exactly.
-   Selected rows keep the selected tint while hovered (later rule of equal
-   specificity); the ramp itself only becomes visible together with the
-   hover action cluster (group-hover/row in SessionRow). Ramp shape: a 40px
-   gradient slope, then solid color to the row's right edge so the whole
-   action cluster sits on full background. */
-.session-row-button:hover {
-  background: var(--sidebar-accent);
-}
-.session-row-selected .session-row-button {
+   The row (div role=button) carries the hover tint itself; selected rows
+   use .session-row-selected instead of the hover/focus classes, so
+   unlayered CSS here also outranks Tailwind's layered utilities as a
+   second guard. The ramp only becomes visible together with the action
+   cluster (group-hover/row and group-focus-within/row in SessionRow), so
+   its base gradient targets the hover state; the selected override keeps
+   it in sync. Ramp shape: a 40px gradient slope, then solid color to the
+   row's right edge so the whole action cluster sits on full background. */
+.session-row-selected {
   background: var(--sidebar-selected);
   color: var(--sidebar-accent-foreground);
 }
@@ -191,19 +191,11 @@
   background: linear-gradient(
     to right,
     transparent,
-    var(--sidebar) 40px,
-    var(--sidebar) 100%
-  );
-}
-.session-row:hover .session-fade {
-  background: linear-gradient(
-    to right,
-    transparent,
     var(--sidebar-accent) 40px,
     var(--sidebar-accent) 100%
   );
 }
-.session-row.session-row-selected .session-fade {
+.session-row-selected .session-fade {
   background: linear-gradient(
     to right,
     transparent,

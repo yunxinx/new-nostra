@@ -41,7 +41,7 @@ export function TurnActions({ align, text }: TurnActionsProps) {
     >
       <button
         aria-label={t("chat.copyMessage")}
-        className="text-muted-foreground hover:text-foreground flex size-6 items-center justify-center rounded-[6px]"
+        className="text-muted-foreground hover:bg-secondary hover:text-secondary-foreground flex size-6 items-center justify-center rounded-[6px]"
         onClick={() => void handleCopy()}
         type="button"
       >

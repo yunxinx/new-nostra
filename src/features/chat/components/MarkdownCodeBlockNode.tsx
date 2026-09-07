@@ -54,11 +54,11 @@ export function MarkdownCodeBlockNode({
 
   return (
     <div className="border-border overflow-hidden rounded-[6px] border">
-      <div className="bg-code-header text-muted-foreground flex items-center justify-between px-3 py-1">
+      <div className="bg-code-header text-muted-foreground flex items-center justify-between px-3 py-0.5">
         <span className="text-[13px]">{language}</span>
         <button
           aria-label={t("chat.copyCode")}
-          className="hover:text-foreground flex size-5 items-center justify-center rounded-[6px]"
+          className="text-muted-foreground hover:bg-secondary hover:text-secondary-foreground flex size-5 items-center justify-center rounded-[6px]"
           onClick={() => void handleCopy()}
           type="button"
         >
@@ -69,17 +69,17 @@ export function MarkdownCodeBlockNode({
           )}
         </button>
       </div>
-      {/* Header py-1 + body pt-2 keeps the 12px header-to-code gap.
+      {/* Header py-0.5 + body pt-2.5 keeps the 12px header-to-code gap.
           Body bottom padding is 12px unconditionally; the old app shrank it
           to 2px when content overflowed horizontally — detecting overflow
           is not done here. */}
       {html !== null ? (
         <div
-          className="bg-muted text-foreground overflow-x-auto px-3 pt-2 pb-3 font-mono text-[13px] leading-relaxed"
+          className="bg-muted text-foreground overflow-x-auto px-3 pt-2.5 pb-3 font-mono text-[13px] leading-relaxed"
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <pre className="bg-muted text-foreground overflow-x-auto px-3 pt-2 pb-3 font-mono text-[13px] leading-relaxed">
+        <pre className="bg-muted text-foreground overflow-x-auto px-3 pt-2.5 pb-3 font-mono text-[13px] leading-relaxed">
           <code>{code}</code>
         </pre>
       )}
