@@ -83,10 +83,10 @@
   --chart-4: #737373;
   --chart-5: #a3a3a3;
   --radius: 0.375rem;
-  /* Code-block header surface: --secondary darkened in 0.01 HSL-lightness
-     steps until its WCAG contrast against the --muted code body reaches 1.2
-     (secondary alone is 1.16, which reads as "no header background"). */
-  --code-header: #e0e0e0;
+  /* Code-block header surface: the midpoint interpolated between --muted
+     (the code body) and --secondary — faintly distinguishable without
+     competing with the code. */
+  --code-header: #ededed;
   --sidebar: #fafafa;
   --sidebar-foreground: #0a0a0a;
   --sidebar-primary: #171717;
@@ -126,10 +126,10 @@
   --chart-3: #768390;
   --chart-4: #636e7b;
   --chart-5: #545d68;
-  /* Code-block header surface: --secondary lightened one 0.01 HSL-lightness
-     step until its WCAG contrast against the --muted code body reaches 1.2
-     (secondary alone is 1.18, which reads as "no header background"). */
-  --code-header: #39414a;
+  /* Code-block header surface: the midpoint interpolated between --muted
+     (the code body) and --secondary — faintly distinguishable without
+     competing with the code. */
+  --code-header: #323942;
   --sidebar: #2d333b;
   --sidebar-foreground: #adbac7;
   --sidebar-primary: #316dca;

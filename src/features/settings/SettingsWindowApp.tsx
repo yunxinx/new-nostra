@@ -37,9 +37,12 @@ export function SettingsWindowApp() {
             <button
               aria-current={tab === activeTab ? "true" : undefined}
               className={cn(
-                "hover:bg-sidebar-accent text-sidebar-foreground flex h-[30px] w-full items-center rounded-[6px] px-2 text-left text-sm",
-                tab === activeTab &&
-                  "bg-sidebar-selected text-sidebar-accent-foreground",
+                "text-sidebar-foreground flex h-[30px] w-full items-center rounded-[6px] px-2 text-left text-sm",
+                // The hover variant out-specifies a plain selected class, so
+                // the selected tab must not carry the hover class at all.
+                tab === activeTab
+                  ? "bg-sidebar-selected text-sidebar-accent-foreground"
+                  : "hover:bg-sidebar-accent",
               )}
               key={tab}
               onClick={() => setActiveTab(tab)}

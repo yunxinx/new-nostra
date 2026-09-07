@@ -1,4 +1,5 @@
 import { Moon, Settings, Sun } from "lucide-react";
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -16,6 +17,11 @@ const ACCOUNT_PLACEHOLDER_NAME = "Nostra";
 export function AccountBar() {
   const { t } = useTranslation();
   const isDark = useTheme();
+  // Suppressing the focus return only for the settings path: opening the
+  // settings window unfocuses this webview while the returned focus leaves
+  // the trigger :focus-visible, so the ring persists until the window is
+  // clicked. Esc and other closes keep the default focus return.
+  const isSettingsOpenPending = useRef(false);
 
   return (
     <div className="flex h-[52px] shrink-0 items-center px-2">
@@ -34,12 +40,27 @@ export function AccountBar() {
             </span>
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-48" side="top">
+        <DropdownMenuContent
+          align="start"
+          className="w-48"
+          onCloseAutoFocus={(event) => {
+            if (isSettingsOpenPending.current) {
+              event.preventDefault();
+            }
+            isSettingsOpenPending.current = false;
+          }}
+          side="top"
+        >
           <DropdownMenuItem onSelect={() => toggleTheme()}>
             {isDark ? <Moon /> : <Sun />}
             {t(isDark ? "account.switchToLight" : "account.switchToDark")}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void openSettings()}>
+          <DropdownMenuItem
+            onSelect={() => {
+              isSettingsOpenPending.current = true;
+              void openSettings();
+            }}
+          >
             <Settings />
             {t("account.settings")}
           </DropdownMenuItem>
