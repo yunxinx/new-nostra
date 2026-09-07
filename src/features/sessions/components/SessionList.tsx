@@ -63,7 +63,7 @@ export function SessionList({
 
   if (groups.length === 0) {
     return (
-      <p className="text-muted-foreground px-1 py-6 text-center text-sm">
+      <p className="text-muted-foreground px-1 py-6 text-center text-sm select-none">
         {t("sessions.empty")}
       </p>
     );
@@ -78,7 +78,7 @@ export function SessionList({
             <div className="flex h-[22px] items-center">
               <button
                 aria-expanded={!isCollapsed}
-                className="group/header hover:bg-sidebar-accent/60 text-sidebar-foreground/60 focus-visible:ring-ring/50 inline-flex h-full items-center gap-0.5 rounded-[6px] px-1 text-left text-xs outline-none focus-visible:ring-2"
+                className="group/header hover:bg-sidebar-accent/60 text-sidebar-foreground/60 focus-visible:ring-ring/50 inline-flex h-full items-center gap-0.5 rounded-[6px] px-1 text-left text-xs outline-none select-none focus-visible:ring-3"
                 onClick={() => handleToggleGroup(group.key)}
                 type="button"
               >

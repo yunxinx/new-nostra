@@ -5,6 +5,12 @@ import { Check, Copy } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+
 import { highlightCode, normalizeLanguage } from "../highlighter";
 
 interface CodeBlockNodeData {
@@ -54,32 +60,37 @@ export function MarkdownCodeBlockNode({
 
   return (
     <div className="border-border overflow-hidden rounded-[6px] border">
-      <div className="bg-code-header text-muted-foreground flex items-center justify-between px-3 py-0.5">
+      <div className="bg-code-header text-muted-foreground flex items-center justify-between px-3 py-1 select-none">
         <span className="text-[13px]">{language}</span>
-        <button
-          aria-label={t("chat.copyCode")}
-          className="text-muted-foreground hover:bg-secondary hover:text-secondary-foreground flex size-5 items-center justify-center rounded-[6px]"
-          onClick={() => void handleCopy()}
-          type="button"
-        >
-          {isCopied ? (
-            <Check className="size-3" />
-          ) : (
-            <Copy className="size-3" />
-          )}
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label={t("chat.copyCode")}
+              className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:ring-ring/50 flex size-5 items-center justify-center rounded-[6px] outline-none focus-visible:ring-3"
+              onClick={() => void handleCopy()}
+              type="button"
+            >
+              {isCopied ? (
+                <Check className="size-3" />
+              ) : (
+                <Copy className="size-3" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t("chat.copyCode")}</TooltipContent>
+        </Tooltip>
       </div>
-      {/* Header py-0.5 + body pt-2.5 keeps the 12px header-to-code gap.
+      {/* Header py-1 + body pt-2 keeps the 12px header-to-code gap.
           Body bottom padding is 12px unconditionally; the old app shrank it
           to 2px when content overflowed horizontally — detecting overflow
           is not done here. */}
       {html !== null ? (
         <div
-          className="bg-muted text-foreground overflow-x-auto px-3 pt-2.5 pb-3 font-mono text-[13px] leading-relaxed"
+          className="bg-muted text-foreground overflow-x-auto px-3 pt-2 pb-3 font-mono text-[13px] leading-relaxed"
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <pre className="bg-muted text-foreground overflow-x-auto px-3 pt-2.5 pb-3 font-mono text-[13px] leading-relaxed">
+        <pre className="bg-muted text-foreground overflow-x-auto px-3 pt-2 pb-3 font-mono text-[13px] leading-relaxed">
           <code>{code}</code>
         </pre>
       )}

@@ -20,7 +20,7 @@ export function EmptyState({ variant }: EmptyStateProps) {
 
   return (
     <div className="flex flex-1 items-center justify-center">
-      <div className="px-6 py-10 text-center">
+      <div className="px-6 py-10 text-center select-none">
         <h2 className="text-foreground text-2xl font-semibold">{copy.title}</h2>
         <p className="text-muted-foreground mt-2 text-sm">{copy.hint}</p>
       </div>

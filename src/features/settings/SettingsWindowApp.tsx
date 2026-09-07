@@ -37,7 +37,7 @@ export function SettingsWindowApp() {
             <button
               aria-current={tab === activeTab ? "true" : undefined}
               className={cn(
-                "text-sidebar-foreground flex h-[30px] w-full items-center rounded-[6px] px-2 text-left text-sm",
+                "text-sidebar-foreground focus-visible:ring-ring/50 flex h-[30px] w-full items-center rounded-[6px] px-2 text-left text-sm outline-none select-none focus-visible:ring-3",
                 // The hover variant out-specifies a plain selected class, so
                 // the selected tab must not carry the hover class at all.
                 tab === activeTab

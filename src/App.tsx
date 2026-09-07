@@ -5,6 +5,11 @@ import { useTranslation } from "react-i18next";
 
 import { TitleBarControls } from "@/components/common/TitleBarControls";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useTheme } from "@/features/appearance/use-theme";
 import { MessageList } from "@/features/chat/components/MessageList";
 import { Sidebar } from "@/features/sessions/components/Sidebar";
@@ -79,22 +84,32 @@ export function App() {
         </section>
       </main>
       <TitleBarControls>
-        <Button
-          aria-label={t("app.toggleSidebar")}
-          onClick={toggleSidebarCollapsed}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <PanelLeft />
-        </Button>
-        <Button
-          aria-label={t("app.newChat")}
-          onClick={() => setActiveSession(null)}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <SquarePen />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              aria-label={t("app.toggleSidebar")}
+              onClick={toggleSidebarCollapsed}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <PanelLeft />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("app.toggleSidebar")}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              aria-label={t("app.newChat")}
+              onClick={() => setActiveSession(null)}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <SquarePen />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("app.newChat")}</TooltipContent>
+        </Tooltip>
       </TitleBarControls>
     </div>
   );

@@ -3,6 +3,11 @@ import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const LINE_HEIGHT_PX = 20;
 // 8 lines of text-sm (14px/20px line-height); taller input scrolls internally.
@@ -59,23 +64,33 @@ export function Composer({ onSend }: ComposerProps) {
       <div className="flex items-center gap-1 px-1">
         {/* Attachment is a provider-domain placeholder; the affordance lands
             now so the toolbar layout is final. */}
-        <Button
-          aria-label={t("chat.composer.attach")}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <Plus />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              aria-label={t("chat.composer.attach")}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <Plus />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("chat.composer.attach")}</TooltipContent>
+        </Tooltip>
         <div className="flex-1" />
-        <Button
-          aria-label={t("chat.composer.send")}
-          disabled={!value.trim()}
-          onClick={handleSubmit}
-          size="icon-sm"
-          variant="default"
-        >
-          <ArrowUp />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              aria-label={t("chat.composer.send")}
+              disabled={!value.trim()}
+              onClick={handleSubmit}
+              size="icon-sm"
+              variant="default"
+            >
+              <ArrowUp />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("chat.composer.send")}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );

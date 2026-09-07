@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 
 import type { ThemeOverride } from "@/stores/ui-store";
 
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { SettingsWindowApp } from "@/features/settings/SettingsWindowApp";
 import { initI18n } from "@/lib/i18n";
 import { useUiStore } from "@/stores/ui-store";
@@ -45,7 +46,11 @@ const queryClient = new QueryClient();
 createRoot(rootElement).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <SettingsWindowApp />
+      {/* Tooltip primitives throw without a Provider context, so both window
+          entries carry one even before any tooltip exists here. */}
+      <TooltipProvider>
+        <SettingsWindowApp />
+      </TooltipProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

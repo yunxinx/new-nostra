@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import type { ThemeOverride } from "@/stores/ui-store";
 
 import { App } from "@/App";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { initI18n } from "@/lib/i18n";
 import { useUiStore } from "@/stores/ui-store";
 
@@ -45,7 +46,9 @@ const queryClient = new QueryClient();
 createRoot(rootElement).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <TooltipProvider>
+        <App />
+      </TooltipProvider>
     </QueryClientProvider>
   </StrictMode>,
 );
