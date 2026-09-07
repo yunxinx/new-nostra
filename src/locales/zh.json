@@ -1,0 +1,20 @@
+{
+  "app": {
+    "name": "Nostra",
+    "sidebarTitle": "会话",
+    "toggleSidebar": "切换侧栏",
+    "infoTitle": "应用信息",
+    "infoUnavailable": "应用信息不可用",
+    "version": "版本",
+    "os": "系统"
+  },
+  "errors": {
+    "db": "数据库错误",
+    "network": "网络错误",
+    "protocol": "协议错误",
+    "config": "配置错误",
+    "not_found": "未找到",
+    "invalid_input": "无效输入",
+    "internal": "内部错误"
+  }
+}

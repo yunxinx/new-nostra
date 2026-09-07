@@ -1,0 +1,20 @@
+{
+  "app": {
+    "name": "Nostra",
+    "sidebarTitle": "Sessions",
+    "toggleSidebar": "Toggle sidebar",
+    "infoTitle": "App information",
+    "infoUnavailable": "App information unavailable",
+    "version": "Version",
+    "os": "Platform"
+  },
+  "errors": {
+    "db": "Database error",
+    "network": "Network error",
+    "protocol": "Protocol error",
+    "config": "Configuration error",
+    "not_found": "Not found",
+    "invalid_input": "Invalid input",
+    "internal": "Internal error"
+  }
+}
