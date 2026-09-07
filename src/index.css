@@ -46,6 +46,7 @@
   --color-foreground: var(--foreground);
   --color-background: var(--background);
   --color-selection: var(--selection);
+  --color-code-header: var(--code-header);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   /* lg = 8px per the old app's radius scale (base 6px, lg 8px). */
@@ -82,6 +83,10 @@
   --chart-4: #737373;
   --chart-5: #a3a3a3;
   --radius: 0.375rem;
+  /* Code-block header surface: --secondary darkened in 0.01 HSL-lightness
+     steps until its WCAG contrast against the --muted code body reaches 1.2
+     (secondary alone is 1.16, which reads as "no header background"). */
+  --code-header: #e0e0e0;
   --sidebar: #fafafa;
   --sidebar-foreground: #0a0a0a;
   --sidebar-primary: #171717;
@@ -121,6 +126,10 @@
   --chart-3: #768390;
   --chart-4: #636e7b;
   --chart-5: #545d68;
+  /* Code-block header surface: --secondary lightened one 0.01 HSL-lightness
+     step until its WCAG contrast against the --muted code body reaches 1.2
+     (secondary alone is 1.18, which reads as "no header background"). */
+  --code-header: #39414a;
   --sidebar: #2d333b;
   --sidebar-foreground: #adbac7;
   --sidebar-primary: #316dca;
@@ -164,15 +173,42 @@
   }
 }
 
-/* Long session titles fade out over the last 40px instead of a hard
-   ellipsis cut; the ramp sits under the hover action buttons. Written as
-   plain CSS because the WebKit in Tauri needs the unprefixed property
-   alongside Tailwind's mask utilities. */
-.session-title-fade {
-  mask-image: linear-gradient(
+/* Session-row surfaces and the title fade ramp are declared together so the
+   ramp's solid zone always matches the row's current background exactly.
+   Selected rows keep the selected tint while hovered (later rule of equal
+   specificity); the ramp itself only becomes visible together with the
+   hover action cluster (group-hover/row in SessionRow). Ramp shape: a 40px
+   gradient slope, then solid color to the row's right edge so the whole
+   action cluster sits on full background. */
+.session-row-button:hover {
+  background: var(--sidebar-accent);
+}
+.session-row-selected .session-row-button {
+  background: var(--sidebar-selected);
+  color: var(--sidebar-accent-foreground);
+}
+.session-fade {
+  background: linear-gradient(
     to right,
-    black calc(100% - 40px),
-    transparent 100%
+    transparent,
+    var(--sidebar) 40px,
+    var(--sidebar) 100%
+  );
+}
+.session-row:hover .session-fade {
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--sidebar-accent) 40px,
+    var(--sidebar-accent) 100%
+  );
+}
+.session-row.session-row-selected .session-fade {
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--sidebar-selected) 40px,
+    var(--sidebar-selected) 100%
   );
 }
 

@@ -14,8 +14,11 @@ interface SessionRowProps {
   session: MockSession;
 }
 
-// Actions sit above the title's fade ramp but outside the row button so the
-// row itself stays a single valid button element.
+// Layering, outermost first: the row button (title, truncated), then the
+// hover fade ramp (pointer-events-none, DOM after the button so it paints
+// over the title), then the action cluster (paints over the ramp and stays
+// clickable). The ramp lives outside the button so the row itself remains
+// a single valid button element.
 export function SessionRow({
   isActive,
   onDelete,
@@ -26,20 +29,24 @@ export function SessionRow({
   const { t } = useTranslation();
 
   return (
-    <div className="group/row relative">
+    <div
+      className={cn(
+        "session-row group/row relative",
+        isActive && "session-row-selected",
+      )}
+    >
       <button
         aria-current={isActive ? "true" : undefined}
-        className={cn(
-          "hover:bg-sidebar-accent text-sidebar-foreground flex h-8 w-full items-center rounded-[6px] px-2 text-left text-sm",
-          isActive && "bg-sidebar-selected text-sidebar-accent-foreground",
-        )}
+        className="session-row-button text-sidebar-foreground flex h-8 w-full items-center rounded-[6px] px-2 text-left text-sm"
         onClick={onSelect}
         type="button"
       >
-        <span className="session-title-fade min-w-0 flex-1 overflow-hidden whitespace-nowrap">
-          {session.title}
-        </span>
+        <span className="min-w-0 flex-1 truncate">{session.title}</span>
       </button>
+      <div
+        aria-hidden="true"
+        className="session-fade pointer-events-none invisible absolute inset-y-0 right-0 w-[98px] rounded-[6px] group-hover/row:visible"
+      />
       <div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100">
         <Button
           aria-label={t(

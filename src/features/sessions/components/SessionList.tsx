@@ -75,19 +75,21 @@ export function SessionList({
         const isCollapsed = collapsedGroups.has(group.key);
         return (
           <div className="flex flex-col gap-1" key={group.key}>
-            <button
-              aria-expanded={!isCollapsed}
-              className="group/header hover:bg-sidebar-accent/60 text-sidebar-foreground/60 flex h-[22px] items-center gap-0.5 rounded-[6px] px-1 text-left text-xs"
-              onClick={() => handleToggleGroup(group.key)}
-              type="button"
-            >
-              {isCollapsed ? (
-                <ChevronRight className="size-3 opacity-0 group-hover/header:opacity-100" />
-              ) : (
-                <ChevronDown className="size-3 opacity-0 group-hover/header:opacity-100" />
-              )}
-              {t(`sessions.groups.${group.key}`)}
-            </button>
+            <div className="flex h-[22px] items-center">
+              <button
+                aria-expanded={!isCollapsed}
+                className="group/header hover:bg-sidebar-accent/60 text-sidebar-foreground/60 focus-visible:ring-ring/50 inline-flex h-full items-center gap-0.5 rounded-[6px] px-1 text-left text-xs outline-none focus-visible:ring-2"
+                onClick={() => handleToggleGroup(group.key)}
+                type="button"
+              >
+                {t(`sessions.groups.${group.key}`)}
+                {isCollapsed ? (
+                  <ChevronRight className="size-3 opacity-0 group-hover/header:opacity-100" />
+                ) : (
+                  <ChevronDown className="size-3 opacity-0 group-hover/header:opacity-100" />
+                )}
+              </button>
+            </div>
             {!isCollapsed &&
               group.sessions.map((session) => (
                 <SessionRow

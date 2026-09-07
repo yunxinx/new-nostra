@@ -26,7 +26,7 @@ interface MessageListProps {
 
 interface MessageRowProps {
   message: ChatMessage;
-  order: number;
+  nextRole: "assistant" | "user" | undefined;
 }
 
 export function MessageList({ hasSessions, messages }: MessageListProps) {
@@ -107,7 +107,11 @@ export function MessageList({ hasSessions, messages }: MessageListProps) {
             style={{ paddingBottom: composerHeight + 12 }}
           >
             {allMessages.map((message, index) => (
-              <MessageRow key={message.id} message={message} order={index} />
+              <MessageRow
+                key={message.id}
+                message={message}
+                nextRole={allMessages[index + 1]?.role}
+              />
             ))}
           </div>
         )}
@@ -136,19 +140,17 @@ export function MessageList({ hasSessions, messages }: MessageListProps) {
   );
 }
 
-// A user message opens a turn (20px gap); assistant replies follow inside the
-// turn with a 4px gap, matching the old transcript rhythm.
-function MessageRow({ message, order }: MessageRowProps) {
-  const startsTurn = order === 0 || message.role === "user";
-  const marginClass = order === 0 ? undefined : startsTurn ? "mt-5" : "mt-1";
+// Turn rhythm: every message body carries pb-1; the last message of a turn
+// additionally renders the action row (mt-1 + pb-5, see TurnActions).
+// Adjacent messages share a turn only when their roles match; a role change
+// opens a new turn. The list's own pt-1 supplies the top gap above the
+// first message.
+function MessageRow({ message, nextRole }: MessageRowProps) {
+  const isTurnEnd = nextRole === undefined || nextRole !== message.role;
 
-  return (
-    <div className={marginClass}>
-      {message.role === "user" ? (
-        <UserBubble content={message.content} />
-      ) : (
-        <AssistantMessage content={message.content} />
-      )}
-    </div>
+  return message.role === "user" ? (
+    <UserBubble content={message.content} isTurnEnd={isTurnEnd} />
+  ) : (
+    <AssistantMessage content={message.content} isTurnEnd={isTurnEnd} />
   );
 }

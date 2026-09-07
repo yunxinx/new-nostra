@@ -27,6 +27,10 @@ pub fn run() {
         // after its first paint (App.tsx).
         .plugin(
             tauri_plugin_window_state::Builder::default()
+                // The settings window's placement is recomputed on every open
+                // (centered on the chat column by the frontend); the plugin's
+                // restore would override it with the last-closed position.
+                .with_denylist(&["settings"])
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::SIZE
                         | tauri_plugin_window_state::StateFlags::POSITION

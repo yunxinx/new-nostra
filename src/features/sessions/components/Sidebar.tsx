@@ -1,5 +1,5 @@
 import { cn } from "cn";
-import { type PointerEvent, useRef, useState } from "react";
+import { type PointerEvent, useEffect, useRef, useState } from "react";
 
 import { useUiStore } from "@/stores/ui-store";
 
@@ -31,7 +31,26 @@ export function Sidebar({
   const [isResizing, setIsResizing] = useState(false);
   const resizeStartRef = useRef<null | ResizeStart>(null);
 
+  // The selection leak a resize drag can produce lands in the main content
+  // area, outside this subtree, so the select-none backstop has to cover the
+  // whole document. The cleanup pairs with the add so every exit path
+  // (pointerup, pointercancel, unmount) restores selection.
+  useEffect(() => {
+    if (!isResizing) {
+      return;
+    }
+    document.body.classList.add("select-none");
+    return () => {
+      document.body.classList.remove("select-none");
+    };
+  }, [isResizing]);
+
   function handleResizeStart(event: PointerEvent<HTMLDivElement>): void {
+    // Preventing the default pointerdown behavior blocks the text-selection
+    // anchor that would otherwise extend into the main area as the pointer
+    // sweeps it during a resize drag.
+    event.preventDefault();
+    document.getSelection()?.removeAllRanges();
     resizeStartRef.current = {
       pointerId: event.pointerId,
       startWidth: useUiStore.getState().sidebarWidth,
