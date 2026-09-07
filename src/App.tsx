@@ -1,20 +1,24 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { PanelLeft } from "lucide-react";
-import { useEffect } from "react";
+import { PanelLeft, SquarePen } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { AppInfo } from "@/types/ipc";
-
+import { TitleBarControls } from "@/components/common/TitleBarControls";
 import { Button } from "@/components/ui/button";
-import { useAppInfo } from "@/features/app/hooks/use-app-info";
+import { useTheme } from "@/features/appearance/use-theme";
+import { MessageList } from "@/features/chat/components/MessageList";
+import { Sidebar } from "@/features/sessions/components/Sidebar";
+import { MOCK_SESSIONS } from "@/features/sessions/mock";
+import { useShortcuts } from "@/hooks/use-shortcuts";
 import { useUiStore } from "@/stores/ui-store";
-import { isAppError } from "@/types/ipc";
 
 export function App() {
   const { t } = useTranslation();
-  const sidebarOpen = useUiStore((s) => s.sidebarOpen);
-  const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
-  const { data: appInfo, error } = useAppInfo();
+  useTheme();
+  useShortcuts();
+  const toggleSidebarCollapsed = useUiStore((s) => s.toggleSidebarCollapsed);
+  const setActiveSession = useUiStore((s) => s.setActiveSession);
+  const activeSessionId = useUiStore((s) => s.activeSessionId);
 
   // The window is created hidden (geometry restores offscreen of view); this
   // mount effect runs after React's first commit, so show() reveals painted
@@ -23,65 +27,75 @@ export function App() {
     void getCurrentWindow().show();
   }, []);
 
+  // Mock deletion only hides rows locally and never persists; the session
+  // domain owns real deletion (persistence plus the confirm popover).
+  const [hiddenSessionIds, setHiddenSessionIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+
+  const sessions = MOCK_SESSIONS.filter(
+    (session) => !hiddenSessionIds.has(session.id),
+  );
+  const activeSession = sessions.find(
+    (session) => session.id === activeSessionId,
+  );
+
+  function handleDeleteSession(sessionId: string): void {
+    setHiddenSessionIds((prev) => {
+      const next = new Set(prev);
+      next.add(sessionId);
+      return next;
+    });
+  }
+
   return (
-    <div className="bg-background text-foreground flex h-screen">
-      {sidebarOpen && (
-        <aside className="border-sidebar-border bg-sidebar w-64 shrink-0 border-r">
-          <h2 className="text-sidebar-foreground px-4 py-3 text-sm font-semibold">
-            {t("app.sidebarTitle")}
-          </h2>
-        </aside>
-      )}
-
+    <div className="bg-background text-foreground flex h-screen overflow-hidden">
+      <Sidebar
+        onDeleteSession={handleDeleteSession}
+        onSelectSession={setActiveSession}
+        sessions={sessions}
+      />
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-2 border-b px-4 py-2">
-          <Button
-            aria-label={t("app.toggleSidebar")}
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            size="icon"
-            variant="ghost"
-          >
-            <PanelLeft />
-          </Button>
-          <span className="text-sm font-semibold">
-            {appInfo?.name ?? t("app.name")}
-          </span>
-        </header>
-
-        <section className="flex-1 overflow-y-auto p-4">
-          {error ? (
-            <InfoError error={error} />
-          ) : appInfo ? (
-            <InfoCard appInfo={appInfo} />
-          ) : null}
+        {/* Reserved title row: drag surface behind the fixed controls; the
+            sidebar paints its own reserved row in sidebar tokens. */}
+        <div className="h-[34px] shrink-0" data-tauri-drag-region />
+        <section className="min-h-0 flex-1">
+          {activeSession ? (
+            <MessageList
+              hasSessions={sessions.length > 0}
+              key={activeSession.id}
+              messages={activeSession.messages}
+            />
+          ) : (
+            // A null selection is the new-chat state; with no sessions left
+            // the list shows the no-sessions empty state instead. The session
+            // domain replaces the data source without touching the components.
+            <MessageList
+              hasSessions={sessions.length > 0}
+              key="draft"
+              messages={[]}
+            />
+          )}
         </section>
       </main>
+      <TitleBarControls>
+        <Button
+          aria-label={t("app.toggleSidebar")}
+          onClick={toggleSidebarCollapsed}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <PanelLeft />
+        </Button>
+        <Button
+          aria-label={t("app.newChat")}
+          onClick={() => setActiveSession(null)}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <SquarePen />
+        </Button>
+      </TitleBarControls>
     </div>
   );
-}
-
-function InfoCard({ appInfo }: { appInfo: AppInfo }) {
-  const { t } = useTranslation();
-
-  return (
-    <div className="bg-card text-card-foreground rounded-xl border p-4">
-      <h3 className="mb-3 text-sm font-semibold">{t("app.infoTitle")}</h3>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
-        <dt className="text-muted-foreground">{t("app.version")}</dt>
-        <dd>{appInfo.version}</dd>
-        <dt className="text-muted-foreground">{t("app.os")}</dt>
-        <dd>{appInfo.os}</dd>
-      </dl>
-    </div>
-  );
-}
-
-function InfoError({ error }: { error: unknown }) {
-  const { t } = useTranslation();
-
-  // Rust rejections carry the AppError shape; anything else is unexpected.
-  const copy = isAppError(error)
-    ? t(`errors.${error.code}`)
-    : t("app.infoUnavailable");
-  return <p className="text-destructive text-sm">{copy}</p>;
 }

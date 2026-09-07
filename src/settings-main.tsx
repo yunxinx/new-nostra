@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 
 import type { ThemeOverride } from "@/stores/ui-store";
 
-import { App } from "@/App";
+import { SettingsWindowApp } from "@/features/settings/SettingsWindowApp";
 import { initI18n } from "@/lib/i18n";
 import { useUiStore } from "@/stores/ui-store";
 
@@ -35,9 +35,9 @@ void listen<{ override: ThemeOverride }>("ui://theme-changed", (event) => {
 
 initI18n();
 
-const rootElement = document.getElementById("root");
+const rootElement = document.getElementById("settings-root");
 if (!rootElement) {
-  throw new Error("root element missing in index.html");
+  throw new Error("settings root element missing in settings.html");
 }
 
 const queryClient = new QueryClient();
@@ -45,7 +45,7 @@ const queryClient = new QueryClient();
 createRoot(rootElement).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <SettingsWindowApp />
     </QueryClientProvider>
   </StrictMode>,
 );

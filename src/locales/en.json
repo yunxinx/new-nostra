@@ -1,12 +1,50 @@
 {
   "app": {
-    "name": "Nostra",
-    "sidebarTitle": "Sessions",
-    "toggleSidebar": "Toggle sidebar",
-    "infoTitle": "App information",
-    "infoUnavailable": "App information unavailable",
-    "version": "Version",
-    "os": "Platform"
+    "newChat": "New chat",
+    "toggleSidebar": "Toggle sidebar"
+  },
+  "sessions": {
+    "delete": "Delete chat",
+    "favorite": "Favorite",
+    "unfavorite": "Unfavorite",
+    "empty": "No conversations yet",
+    "groups": {
+      "favorites": "Favorites",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "thisWeek": "This week",
+      "thisMonth": "This month",
+      "earlier": "Earlier"
+    }
+  },
+  "account": {
+    "menu": "Account menu",
+    "switchToLight": "Switch to light mode",
+    "switchToDark": "Switch to dark mode",
+    "settings": "Settings…"
+  },
+  "chat": {
+    "composer": {
+      "placeholder": "Send a message. Enter to send, Shift+Enter for newline.",
+      "send": "Send",
+      "attach": "Attach"
+    },
+    "copyCode": "Copy code",
+    "copyMessage": "Copy message",
+    "jumpToLatest": "Jump to latest",
+    "empty": {
+      "noSessionsTitle": "No conversation open",
+      "noSessionsHint": "Click \"New chat\" to start a conversation.",
+      "newChatTitle": "How can I help you today?",
+      "newChatHint": "Ask me anything. Enter to send, Shift+Enter for newline."
+    }
+  },
+  "settings": {
+    "placeholder": "Settings options will arrive in a future release.",
+    "tabs": {
+      "general": "General",
+      "appearance": "Appearance"
+    }
   },
   "errors": {
     "db": "Database error",

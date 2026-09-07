@@ -1,7 +1,6 @@
 // Tests may use unwrap/expect on fixtures; production paths must propagate errors.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-mod commands;
 mod db;
 mod error;
 mod state;
@@ -70,7 +69,6 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::app::app_info])
         .build(tauri::generate_context!())
         .expect("error while building Nostra")
         .run(|_app, event| match event {

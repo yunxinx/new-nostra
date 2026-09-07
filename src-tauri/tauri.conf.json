@@ -15,8 +15,11 @@
       {
         "label": "main",
         "title": "Nostra",
-        "width": 1100,
-        "height": 720,
+        "titleBarStyle": "Overlay",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 720,
+        "minHeight": 480,
         "visible": false
       }
     ],

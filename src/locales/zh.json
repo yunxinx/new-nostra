@@ -1,12 +1,50 @@
 {
   "app": {
-    "name": "Nostra",
-    "sidebarTitle": "会话",
-    "toggleSidebar": "切换侧栏",
-    "infoTitle": "应用信息",
-    "infoUnavailable": "应用信息不可用",
-    "version": "版本",
-    "os": "系统"
+    "newChat": "新建会话",
+    "toggleSidebar": "切换侧栏"
+  },
+  "sessions": {
+    "delete": "删除聊天",
+    "favorite": "收藏",
+    "unfavorite": "取消收藏",
+    "empty": "还没有会话",
+    "groups": {
+      "favorites": "收藏",
+      "today": "今天",
+      "yesterday": "昨天",
+      "thisWeek": "本周",
+      "thisMonth": "本月",
+      "earlier": "更早"
+    }
+  },
+  "account": {
+    "menu": "账户菜单",
+    "switchToLight": "切换到浅色模式",
+    "switchToDark": "切换到深色模式",
+    "settings": "设置…"
+  },
+  "chat": {
+    "composer": {
+      "placeholder": "发送消息。Enter 发送，Shift+Enter 换行。",
+      "send": "发送",
+      "attach": "添加附件"
+    },
+    "copyCode": "复制代码",
+    "copyMessage": "复制消息",
+    "jumpToLatest": "跳到最新",
+    "empty": {
+      "noSessionsTitle": "没有打开的会话",
+      "noSessionsHint": "点击“新建会话”开始对话。",
+      "newChatTitle": "今天我能帮你做点什么？",
+      "newChatHint": "随便问点什么。Enter 发送，Shift+Enter 换行。"
+    }
+  },
+  "settings": {
+    "placeholder": "设置项将在后续版本提供。",
+    "tabs": {
+      "general": "通用",
+      "appearance": "外观"
+    }
   },
   "errors": {
     "db": "数据库错误",

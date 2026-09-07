@@ -11,9 +11,17 @@ export default defineConfig(() => {
   const host = process.env.TAURI_DEV_HOST;
 
   return {
+    build: {
+      rollupOptions: {
+        input: {
+          main: path.join(import.meta.dirname, "index.html"),
+          settings: path.join(import.meta.dirname, "settings.html"),
+        },
+      },
+    },
+
     // Don't obscure Rust panics behind Vite output.
     clearScreen: false,
-
     plugins: [
       react(),
       // React Compiler via the official babel plugin (the plugin-react native

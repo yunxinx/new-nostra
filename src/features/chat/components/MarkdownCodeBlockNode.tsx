@@ -1,0 +1,84 @@
+import type { NodeComponentProps } from "markstream-react";
+
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { Check, Copy } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import { highlightCode, normalizeLanguage } from "../highlighter";
+
+interface CodeBlockNodeData {
+  code: string;
+  language: string;
+  type: "code_block";
+}
+
+const COPY_FEEDBACK_MS = 1500;
+
+// Shiki output is sanitized at the source: hast serialization escapes the
+// code text, so the HTML can be mounted directly.
+export function MarkdownCodeBlockNode({
+  isDark = false,
+  node,
+}: NodeComponentProps<CodeBlockNodeData>) {
+  const { t } = useTranslation();
+  const [html, setHtml] = useState<null | string>(null);
+  const [isCopied, setIsCopied] = useState(false);
+  const language = normalizeLanguage(node.language);
+  const code = node.code;
+
+  useEffect(() => {
+    let isCancelled = false;
+    void highlightCode(code, node.language, isDark).then((highlighted) => {
+      if (!isCancelled) {
+        setHtml(highlighted);
+      }
+    });
+    return () => {
+      isCancelled = true;
+    };
+  }, [code, isDark, node.language]);
+
+  useEffect(() => {
+    if (!isCopied) {
+      return;
+    }
+    const timer = window.setTimeout(() => setIsCopied(false), COPY_FEEDBACK_MS);
+    return () => window.clearTimeout(timer);
+  }, [isCopied]);
+
+  async function handleCopy(): Promise<void> {
+    await writeText(code);
+    setIsCopied(true);
+  }
+
+  return (
+    <div className="border-border overflow-hidden rounded-[6px] border">
+      <div className="bg-secondary text-muted-foreground flex h-8 items-center justify-between px-2">
+        <span className="text-xs">{language}</span>
+        <button
+          aria-label={t("chat.copyCode")}
+          className="hover:text-foreground flex size-6 items-center justify-center rounded-[6px]"
+          onClick={() => void handleCopy()}
+          type="button"
+        >
+          {isCopied ? (
+            <Check className="size-3.5" />
+          ) : (
+            <Copy className="size-3.5" />
+          )}
+        </button>
+      </div>
+      {html !== null ? (
+        <div
+          className="bg-muted text-foreground overflow-x-auto p-3 font-mono text-[13px] leading-relaxed"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      ) : (
+        <pre className="bg-muted text-foreground overflow-x-auto p-3 font-mono text-[13px] leading-relaxed">
+          <code>{code}</code>
+        </pre>
+      )}
+    </div>
+  );
+}

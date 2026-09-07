@@ -1,17 +1,53 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
+export type ThemeOverride = "dark" | "light" | "system";
+
+const SIDEBAR_MAX_WIDTH = 440;
+const SIDEBAR_MIN_WIDTH = 220;
+
 interface UiState {
-  setSidebarOpen: (open: boolean) => void;
-  sidebarOpen: boolean;
+  activeSessionId: null | string;
+  setActiveSession: (id: null | string) => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
+  setSidebarWidth: (width: number) => void;
+  setThemeOverride: (override: ThemeOverride) => void;
+  sidebarCollapsed: boolean;
+  sidebarWidth: number;
+  themeOverride: ThemeOverride;
+  toggleSidebarCollapsed: () => void;
 }
 
 export const useUiStore = create<UiState>()(
   immer((set) => ({
-    setSidebarOpen: (sidebarOpen) =>
+    activeSessionId: null,
+    setActiveSession: (activeSessionId) =>
       set((state) => {
-        state.sidebarOpen = sidebarOpen;
+        state.activeSessionId = activeSessionId;
       }),
-    sidebarOpen: true,
+    setSidebarCollapsed: (sidebarCollapsed) =>
+      set((state) => {
+        state.sidebarCollapsed = sidebarCollapsed;
+      }),
+    setSidebarWidth: (sidebarWidth) =>
+      set((state) => {
+        // Resize gestures overshoot the usable range; the store is the
+        // single authority that keeps the width inside 220..440.
+        state.sidebarWidth = Math.min(
+          SIDEBAR_MAX_WIDTH,
+          Math.max(SIDEBAR_MIN_WIDTH, sidebarWidth),
+        );
+      }),
+    setThemeOverride: (themeOverride) =>
+      set((state) => {
+        state.themeOverride = themeOverride;
+      }),
+    sidebarCollapsed: false,
+    sidebarWidth: 272,
+    themeOverride: "system",
+    toggleSidebarCollapsed: () =>
+      set((state) => {
+        state.sidebarCollapsed = !state.sidebarCollapsed;
+      }),
   })),
 );
