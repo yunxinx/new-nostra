@@ -83,17 +83,16 @@
   --chart-4: #737373;
   --chart-5: #a3a3a3;
   --radius: 0.375rem;
-  /* Code-block header surface: the midpoint interpolated between --muted
-     (the code body) and --secondary — faintly distinguishable without
-     competing with the code. */
-  --code-header: #ededed;
+  /* --sidebar and --sidebar-accent are the palette's preferred inputs for
+     the runtime contrast derivation (features/appearance/
+     derived-tokens.ts), which overrides both as inline values and is the
+     only source for --sidebar-selected and --code-header. */
   --sidebar: #fafafa;
   --sidebar-foreground: #0a0a0a;
   --sidebar-primary: #171717;
   --sidebar-primary-foreground: #fafafa;
   --sidebar-accent: #e5e5e5;
   --sidebar-accent-foreground: #171717;
-  --sidebar-selected: #d4d4d4;
   --sidebar-border: #e5e5e5;
   --sidebar-ring: #a3a3a3;
   --selection: #55a0fc;
@@ -126,17 +125,12 @@
   --chart-3: #768390;
   --chart-4: #636e7b;
   --chart-5: #545d68;
-  /* Code-block header surface: the midpoint interpolated between --muted
-     (the code body) and --secondary — faintly distinguishable without
-     competing with the code. */
-  --code-header: #323942;
   --sidebar: #2d333b;
   --sidebar-foreground: #adbac7;
   --sidebar-primary: #316dca;
   --sidebar-primary-foreground: #cdd9e5;
   --sidebar-accent: #373e47;
   --sidebar-accent-foreground: #cdd9e5;
-  --sidebar-selected: #444c56;
   --sidebar-border: #444c56;
   --sidebar-ring: #316dca;
   --selection: #2e4a70;
@@ -156,6 +150,11 @@
   }
   ::selection {
     background: var(--selection);
+  }
+  /* Buttons carry the hand cursor; large row surfaces (the session row, the
+     settings tabs) opt back to the arrow — they select, they do not press. */
+  button:not(:disabled) {
+    cursor: pointer;
   }
   ::-webkit-scrollbar {
     width: 8px;

@@ -3,9 +3,35 @@ import { CheckIcon, ChevronRightIcon } from "lucide-react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import * as React from "react";
 
+// Last input modality, shared by every menu in the window: Radix returns
+// focus to the trigger whenever a menu closes, which leaves a lingering
+// focus ring for pointer users — worst when the chosen action unfocuses
+// the window (opening the settings window) and nothing clears the ring
+// until the next click. A keyboard user's focus must return to a
+// predictable place, so only pointer-initiated closes skip the return.
+// Written by document-level capture listeners (installed from Root, which
+// is mounted before the opening interaction can reach the Content), read
+// in onCloseAutoFocus at close time. Blur carries no pointer or key
+// events, so an unfocused window keeps its last recorded modality.
+let lastInputWasPointer = false;
+
 function DropdownMenu({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
+  React.useEffect(() => {
+    const markPointerInput = () => {
+      lastInputWasPointer = true;
+    };
+    const markKeyboardInput = () => {
+      lastInputWasPointer = false;
+    };
+    document.addEventListener("keydown", markKeyboardInput, true);
+    document.addEventListener("pointerdown", markPointerInput, true);
+    return () => {
+      document.removeEventListener("keydown", markKeyboardInput, true);
+      document.removeEventListener("pointerdown", markPointerInput, true);
+    };
+  }, []);
   return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
 }
 
@@ -47,6 +73,7 @@ function DropdownMenuCheckboxItem({
 function DropdownMenuContent({
   align = "start",
   className,
+  onCloseAutoFocus,
   sideOffset = 4,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
@@ -59,6 +86,7 @@ function DropdownMenuContent({
           className,
         )}
         data-slot="dropdown-menu-content"
+        onCloseAutoFocus={suppressPointerFocusReturn(onCloseAutoFocus)}
         sideOffset={sideOffset}
         {...props}
       />
@@ -212,6 +240,8 @@ function DropdownMenuSubContent({
         "bg-popover text-popover-foreground ring-foreground/10 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 z-50 min-w-[96px] origin-(--radix-dropdown-menu-content-transform-origin) overflow-hidden rounded-lg p-1 shadow-lg ring-1 duration-100",
         className,
       )}
+      // Submenu close focus return is handled by Radix's default behaviour;
+      // no guard needed here.
       data-slot="dropdown-menu-sub-content"
       {...props}
     />
@@ -251,6 +281,17 @@ function DropdownMenuTrigger({
       {...props}
     />
   );
+}
+
+// The pointer-close guard shared by Content and SubContent (see the
+// modality note above). A caller-provided handler runs after the guard.
+function suppressPointerFocusReturn(onCloseAutoFocus?: (event: Event) => void) {
+  return (event: Event) => {
+    if (lastInputWasPointer) {
+      event.preventDefault();
+    }
+    onCloseAutoFocus?.(event);
+  };
 }
 
 export {

@@ -1,5 +1,5 @@
 import { Moon, Settings, Sun } from "lucide-react";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -22,11 +22,6 @@ const ACCOUNT_PLACEHOLDER_NAME = "Nostra";
 export function AccountBar() {
   const { t } = useTranslation();
   const isDark = useTheme();
-  // Suppressing the focus return only for the settings path: opening the
-  // settings window unfocuses this webview while the returned focus leaves
-  // the trigger :focus-visible, so the ring persists until the window is
-  // clicked. Esc and other closes keep the default focus return.
-  const isSettingsOpenPending = useRef(false);
   // The tooltip is open only while the pointer rests on the trigger and the
   // menu is closed. Menu close returns focus to the trigger, which an
   // uncontrolled TooltipTrigger would treat as an open signal; with the
@@ -60,27 +55,12 @@ export function AccountBar() {
           </TooltipTrigger>
           <TooltipContent>{t("account.menu")}</TooltipContent>
         </Tooltip>
-        <DropdownMenuContent
-          align="start"
-          className="w-48"
-          onCloseAutoFocus={(event) => {
-            if (isSettingsOpenPending.current) {
-              event.preventDefault();
-            }
-            isSettingsOpenPending.current = false;
-          }}
-          side="top"
-        >
+        <DropdownMenuContent align="start" className="w-48" side="top">
           <DropdownMenuItem onSelect={() => toggleTheme()}>
             {isDark ? <Moon /> : <Sun />}
             {t(isDark ? "account.switchToLight" : "account.switchToDark")}
           </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={() => {
-              isSettingsOpenPending.current = true;
-              void openSettings();
-            }}
-          >
+          <DropdownMenuItem onSelect={() => void openSettings()}>
             <Settings />
             {t("account.settings")}
           </DropdownMenuItem>

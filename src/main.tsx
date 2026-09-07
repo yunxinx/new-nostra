@@ -8,6 +8,7 @@ import type { ThemeOverride } from "@/stores/ui-store";
 
 import { App } from "@/App";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { seedInitialTheme } from "@/features/appearance/use-theme";
 import { initI18n } from "@/lib/i18n";
 import { useUiStore } from "@/stores/ui-store";
 
@@ -19,14 +20,12 @@ if (import.meta.env.DEV) {
   void attachConsole();
 }
 
-// Seeds the system theme before first paint so the initial render already
-// uses the correct theme tokens. After mount, useTheme in the root component
-// owns the `.dark` class (system follow and manual override), so this
-// initialization has no change listener of its own.
-document.documentElement.classList.toggle(
-  "dark",
-  window.matchMedia("(prefers-color-scheme: dark)").matches,
-);
+// Seeds the system theme and its derived tokens before first paint so the
+// initial render already uses the correct theme values. After mount,
+// useTheme in the root component owns the `.dark` class and the derived
+// tokens (system follow and manual override), so this initialization has
+// no change listener of its own.
+seedInitialTheme();
 
 // Cross-window theme sync: the other window broadcasts override flips; the
 // app entry never unmounts, so no unlisten point exists.
