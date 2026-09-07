@@ -33,10 +33,10 @@ export default defineConfig(
   {
     languageOptions: {
       parserOptions: {
-        // eslint.config.js is not part of the tsconfig project (no allowJs);
-        // allowDefaultProject covers exactly this kind of root config file.
+        // Root-level JS files outside the tsconfig project (no allowJs):
+        // tooling configs and release scripts land here.
         projectService: {
-          allowDefaultProject: ["eslint.config.js"],
+          allowDefaultProject: ["eslint.config.js", "scripts/*.mjs"],
         },
         tsconfigRootDir: import.meta.dirname,
       },
@@ -77,6 +77,24 @@ export default defineConfig(
     files: ["**/*.test.ts", "**/*.test.tsx"],
     rules: {
       "@typescript-eslint/unbound-method": "off",
+    },
+  },
+  {
+    // Release scripts are plain JS without type information, so the
+    // type-aware unsafe-* and template-expression rules can only produce
+    // noise there. Revisit if scripts move to TypeScript.
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/restrict-template-expressions": "off",
     },
   },
   prettierConfig,

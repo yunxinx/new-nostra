@@ -1,0 +1,6 @@
+# Pins the toolchain so local checks and CI lint the same way: stable rolls
+# and can introduce clippy/rustfmt drift between a batch of local commits and
+# their CI run.
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
