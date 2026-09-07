@@ -1,0 +1,25 @@
+pre-commit:
+  parallel: true
+  commands:
+    frontend-format:
+      glob: "*.{js,jsx,ts,tsx,json,css,md,html}"
+      run: pnpm prettier --write --ignore-unknown {staged_files}
+      stage_fixed: true
+    frontend-lint:
+      glob: "*.{js,jsx,ts,tsx}"
+      run: pnpm eslint --fix {staged_files}
+      stage_fixed: true
+    rust-format:
+      run: cd src-tauri && cargo fmt --all --check
+
+pre-push:
+  parallel: true
+  commands:
+    typecheck:
+      run: pnpm typecheck
+    test:
+      run: pnpm test
+    rust-lint:
+      run: cd src-tauri && cargo clippy --workspace --all-targets -- -D warnings
+    rust-test:
+      run: cd src-tauri && cargo test --workspace
