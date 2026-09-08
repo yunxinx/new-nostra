@@ -142,8 +142,14 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* WKWebView shows the text I-beam over any region not opted out of
+     selection, even visually empty chrome, so the default is inverted:
+     body-wide no-selection + arrow cursor, with selectability whitelisted
+     where copying is a legitimate need (.chat-markdown below, code block
+     bodies, the composer textarea). Buttons still override with the hand
+     cursor via the rule further down. */
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground cursor-default select-none;
   }
   html {
     @apply font-sans;
@@ -205,10 +211,15 @@
 
 /* Assistant prose: 14px base with a 1.5/1.3/1.15 heading scale and a tight
    4px block rhythm, overriding markstream's document-oriented defaults
-   (16px base, 2.25rem h1, 1.25em paragraph margins). */
+   (16px base, 2.25rem h1, 1.25em paragraph margins).
+   user-select/cursor are the body-wide no-selection backout for message
+   text: copying prose is a legitimate need, and the I-beam over selectable
+   text is the correct cursor semantics there. */
 .chat-markdown {
   font-size: 0.875rem;
   line-height: 1.5;
+  user-select: text;
+  cursor: auto;
 }
 .chat-markdown .markdown-renderer {
   line-height: 1.5;

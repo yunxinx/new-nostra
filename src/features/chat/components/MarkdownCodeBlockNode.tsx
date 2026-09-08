@@ -60,7 +60,7 @@ export function MarkdownCodeBlockNode({
 
   return (
     <div className="border-border overflow-hidden rounded-[6px] border">
-      <div className="bg-code-header text-muted-foreground flex items-center justify-between px-3 py-1 select-none">
+      <div className="bg-code-header text-muted-foreground flex cursor-default items-center justify-between px-3 py-1 select-none">
         <span className="text-[13px]">{language}</span>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -83,14 +83,15 @@ export function MarkdownCodeBlockNode({
       {/* Header py-1 + body pt-2 keeps the 12px header-to-code gap.
           Body bottom padding is 12px unconditionally; the old app shrank it
           to 2px when content overflowed horizontally — detecting overflow
-          is not done here. */}
+          is not done here. select-text/cursor-text keep code copyable under
+          the body-wide no-selection backout. */}
       {html !== null ? (
         <div
-          className="bg-muted text-foreground overflow-x-auto px-3 pt-2 pb-3 font-mono text-[13px] leading-relaxed"
+          className="bg-muted text-foreground cursor-text overflow-x-auto px-3 pt-2 pb-3 font-mono text-[13px] leading-relaxed select-text"
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <pre className="bg-muted text-foreground overflow-x-auto px-3 pt-2 pb-3 font-mono text-[13px] leading-relaxed">
+        <pre className="bg-muted text-foreground cursor-text overflow-x-auto px-3 pt-2 pb-3 font-mono text-[13px] leading-relaxed select-text">
           <code>{code}</code>
         </pre>
       )}

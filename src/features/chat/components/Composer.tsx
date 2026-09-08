@@ -51,9 +51,12 @@ export function Composer({ onSend }: ComposerProps) {
 
   return (
     <div className="bg-background border-border flex flex-col gap-0.5 rounded-lg border p-1 shadow-md">
+      {/* select-text/cursor-text whitelist the field under the body-wide
+          no-selection backout; relying on the UA default would inherit the
+          arrow cursor instead of the I-beam. */}
       <textarea
         aria-label={t("chat.composer.placeholder")}
-        className="text-foreground placeholder:text-muted-foreground max-h-40 w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-5 outline-none"
+        className="text-foreground placeholder:text-muted-foreground max-h-40 w-full cursor-text resize-none bg-transparent px-2 py-1.5 text-sm leading-5 outline-none select-text"
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={handleKeyDown}
         placeholder={t("chat.composer.placeholder")}

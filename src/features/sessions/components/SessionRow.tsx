@@ -5,11 +5,6 @@ import { Star, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 
 import type { MockSession } from "../mock";
 
@@ -72,49 +67,37 @@ export function SessionRow({
         className="session-fade pointer-events-none invisible absolute inset-y-0 right-0 w-[98px] rounded-[6px] group-focus-within/row:visible group-hover/row:visible"
       />
       <div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              aria-label={t(
-                session.starred ? "sessions.unfavorite" : "sessions.favorite",
-              )}
-              onClick={(event) => {
-                event.stopPropagation();
-                onToggleStar();
-              }}
-              size="icon-xs"
-              variant="ghost"
-            >
-              {/* Amber is the old app's favorite accent; no semantic token
-                  covers it. */}
-              <Star
-                className={cn(
-                  "size-3.5 text-amber-500",
-                  session.starred && "fill-amber-500",
-                )}
-              />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {t(session.starred ? "sessions.unfavorite" : "sessions.favorite")}
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              aria-label={t("sessions.delete")}
-              onClick={(event) => {
-                event.stopPropagation();
-                onDelete();
-              }}
-              size="icon-xs"
-              variant="ghost"
-            >
-              <Trash2 className="text-destructive size-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("sessions.delete")}</TooltipContent>
-        </Tooltip>
+        <Button
+          aria-label={t(
+            session.starred ? "sessions.unfavorite" : "sessions.favorite",
+          )}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleStar();
+          }}
+          size="icon-xs"
+          variant="ghost"
+        >
+          {/* Amber is the old app's favorite accent; no semantic token
+              covers it. */}
+          <Star
+            className={cn(
+              "size-3.5 text-amber-500",
+              session.starred && "fill-amber-500",
+            )}
+          />
+        </Button>
+        <Button
+          aria-label={t("sessions.delete")}
+          onClick={(event) => {
+            event.stopPropagation();
+            onDelete();
+          }}
+          size="icon-xs"
+          variant="ghost"
+        >
+          <Trash2 className="text-destructive size-3.5" />
+        </Button>
       </div>
     </div>
   );

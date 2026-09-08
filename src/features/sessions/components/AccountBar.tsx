@@ -56,7 +56,15 @@ export function AccountBar() {
           <TooltipContent>{t("account.menu")}</TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="start" className="w-48" side="top">
-          <DropdownMenuItem onSelect={() => toggleTheme()}>
+          {/* preventDefault on select keeps the menu open so the user can
+              preview themes back-to-back; the settings item keeps the
+              default close-on-select behavior. */}
+          <DropdownMenuItem
+            onSelect={(event) => {
+              event.preventDefault();
+              toggleTheme();
+            }}
+          >
             {isDark ? <Moon /> : <Sun />}
             {t(isDark ? "account.switchToLight" : "account.switchToDark")}
           </DropdownMenuItem>
