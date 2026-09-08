@@ -2,6 +2,13 @@ import { cn } from "cn";
 import { Tooltip as TooltipPrimitive } from "radix-ui";
 import * as React from "react";
 
+// Tooltips appear only after a deliberate 1s hover; instant popups flash on
+// every transient pointer crossing. Single source of the value: Radix applies
+// delayDuration only on its uncontrolled path, so a controlled open (e.g.
+// AccountBar, coexisting with a DropdownMenu) must re-apply this constant
+// itself and imports it from here.
+const TOOLTIP_HOVER_DELAY_MS = 1000;
+
 // A tooltip is a pure display surface: Radix's hoverable content keeps it
 // open while the pointer rests on the floating layer, which would make it
 // feel like an interactive element. Defaulted here so every tooltip in the
@@ -47,10 +54,8 @@ function TooltipContent({
   );
 }
 
-// Tooltips appear only after a deliberate 1s hover; instant popups flash on
-// every transient pointer crossing.
 function TooltipProvider({
-  delayDuration = 1000,
+  delayDuration = TOOLTIP_HOVER_DELAY_MS,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
   return (
@@ -68,4 +73,10 @@ function TooltipTrigger({
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
 }
 
-export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger };
+export {
+  Tooltip,
+  TOOLTIP_HOVER_DELAY_MS,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+};
