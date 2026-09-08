@@ -42,9 +42,9 @@
   },
   "settings": {
     "language": "界面语言",
-    "languageDesc": "应用界面所使用的语言。",
+    "languageDesc": "应用界面所使用的语言",
     "themeMode": "主题模式",
-    "themeModeDesc": "跟随系统外观，或固定使用浅色/深色。",
+    "themeModeDesc": "跟随系统外观，或固定使用浅色/深色",
     "themeModes": {
       "system": "跟随系统",
       "light": "浅色",

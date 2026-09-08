@@ -31,11 +31,20 @@ export function SettingsWindowApp() {
   useTheme();
   const [activePage, setActivePage] = useState<SettingsPage>("general");
 
-  // The window is created hidden; this mount effect runs after React's first
-  // commit, so show() reveals painted content. Idempotent under StrictMode
+  // The window is created hidden. useEffect does not guarantee the browser
+  // has painted (react.dev), so show() is deferred past two animation
+  // frames: the first frame is then guaranteed on screen. Cleanup cancels
+  // pending frames, keeping the effect side-effect free under StrictMode
   // double-mount.
   useEffect(() => {
-    void getCurrentWindow().show();
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => void getCurrentWindow().show());
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
   }, []);
 
   return (
@@ -80,10 +89,17 @@ export function SettingsWindowApp() {
             rhythm with no card chrome. The About page centers itself
             instead of joining the padded form column. */}
         <div className="min-h-0 flex-1 overflow-y-auto">
+          {/* Baseline alignment with the nav column: the nav centers its
+              20px text line in a 30px row under p-2 (13px from the title
+              row to the text top) while SettingsRow centers the label
+              within its first row's content height — 28px, driven by the
+              h-7 select control — under py-3 (16px). The 3px lift on the
+              padded column closes the gap; recompute it if the first row's
+              tallest control changes. */}
           {activePage === "about" ? (
             <AboutPage />
           ) : (
-            <div className="px-10 pb-4">
+            <div className="-mt-[3px] px-10 pb-4">
               {activePage === "appearance" ? (
                 <AppearancePage />
               ) : (

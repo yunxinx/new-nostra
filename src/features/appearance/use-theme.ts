@@ -1,6 +1,8 @@
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useSyncExternalStore } from "react";
 
 import { applyDerivedTokens } from "@/features/appearance/derived-tokens";
+import { windowBackgroundFor } from "@/lib/window-background";
 import { useUiStore } from "@/stores/ui-store";
 
 // Pre-paint seed for the window entries: applies the system theme and its
@@ -21,12 +23,16 @@ export function useTheme(): boolean {
   const isDark =
     themeOverride === "system" ? systemPrefersDark : themeOverride === "dark";
 
-  // Single owner of the `.dark` class and the derived token overrides:
-  // entries only seed both before first paint and never change them
-  // afterwards.
+  // Single owner of the `.dark` class, the derived token overrides, and the
+  // native window background color: entries only seed the class and tokens
+  // before first paint and never change them afterwards.
   useEffect(() => {
     document.documentElement.classList.toggle("dark", isDark);
     applyDerivedTokens();
+    // The static config color is the dark fallback; this sync corrects
+    // light-theme windows before their hidden window is shown and follows
+    // every later theme change.
+    void getCurrentWindow().setBackgroundColor(windowBackgroundFor(isDark));
   }, [isDark]);
 
   return isDark;

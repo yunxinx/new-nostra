@@ -2,6 +2,7 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { error as logError } from "@tauri-apps/plugin-log";
 
+import { resolveWindowBackground } from "@/lib/window-background";
 import { useUiStore } from "@/stores/ui-store";
 
 const SETTINGS_WINDOW_LABEL = "settings";
@@ -19,6 +20,9 @@ export async function openSettings(): Promise<void> {
   }
   const { x, y } = await computeSettingsPosition();
   const settingsWindow = new WebviewWindow(SETTINGS_WINDOW_LABEL, {
+    // Pre-paints the NSWindow and WKWebView background so the
+    // hidden-then-shown window never flashes white before CSS paints.
+    backgroundColor: resolveWindowBackground(),
     height: SETTINGS_WINDOW_HEIGHT,
     // WindowOptions x/y are logical pixels; hiddenTitle maps to macOS
     // NSWindow.titleVisibility = hidden so the overlay title bar draws no text.
