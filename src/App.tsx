@@ -1,5 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { PanelLeft, SquarePen } from "lucide-react";
+import { SquarePen } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -13,6 +13,7 @@ import {
 import { useTheme } from "@/features/appearance/use-theme";
 import { MessageList } from "@/features/chat/components/MessageList";
 import { Sidebar } from "@/features/sessions/components/Sidebar";
+import { SidebarToggleButton } from "@/features/sessions/components/SidebarToggleButton";
 import { MOCK_SESSIONS } from "@/features/sessions/mock";
 import { useShortcuts } from "@/hooks/use-shortcuts";
 import { useUiStore } from "@/stores/ui-store";
@@ -21,7 +22,6 @@ export function App() {
   const { t } = useTranslation();
   useTheme();
   useShortcuts();
-  const toggleSidebarCollapsed = useUiStore((s) => s.toggleSidebarCollapsed);
   const setActiveSession = useUiStore((s) => s.setActiveSession);
   const activeSessionId = useUiStore((s) => s.activeSessionId);
 
@@ -84,19 +84,7 @@ export function App() {
         </section>
       </main>
       <TitleBarControls>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              aria-label={t("app.toggleSidebar")}
-              onClick={toggleSidebarCollapsed}
-              size="icon-sm"
-              variant="ghost"
-            >
-              <PanelLeft />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("app.toggleSidebar")}</TooltipContent>
-        </Tooltip>
+        <SidebarToggleButton />
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

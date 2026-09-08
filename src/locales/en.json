@@ -1,7 +1,8 @@
 {
   "app": {
     "newChat": "New chat",
-    "toggleSidebar": "Toggle sidebar"
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar"
   },
   "sessions": {
     "delete": "Delete chat",

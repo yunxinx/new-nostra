@@ -1,7 +1,8 @@
 {
   "app": {
     "newChat": "新建会话",
-    "toggleSidebar": "切换侧栏"
+    "collapseSidebar": "折叠侧栏",
+    "expandSidebar": "展开侧栏"
   },
   "sessions": {
     "delete": "删除聊天",
