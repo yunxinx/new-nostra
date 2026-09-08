@@ -31,20 +31,17 @@ export function SettingsWindowApp() {
   useTheme();
   const [activePage, setActivePage] = useState<SettingsPage>("general");
 
-  // The window is created hidden. useEffect does not guarantee the browser
-  // has painted (react.dev), so show() is deferred past two animation
-  // frames: the first frame is then guaranteed on screen. Cleanup cancels
-  // pending frames, keeping the effect side-effect free under StrictMode
-  // double-mount.
+  // The window is created hidden. WebKit never schedules
+  // requestAnimationFrame while the host window is ordered out, so a
+  // rAF-gated show() would deadlock; reveal must not depend on rAF.
+  // setFocus after show: tao's set_focus is a no-op on hidden windows, so
+  // it must run once show() resolves; on macOS it also performs the
+  // app-level activation (activateIgnoringOtherApps). Both calls are
+  // idempotent under StrictMode double-mount.
   useEffect(() => {
-    let secondFrame = 0;
-    const firstFrame = requestAnimationFrame(() => {
-      secondFrame = requestAnimationFrame(() => void getCurrentWindow().show());
-    });
-    return () => {
-      cancelAnimationFrame(firstFrame);
-      cancelAnimationFrame(secondFrame);
-    };
+    void getCurrentWindow()
+      .show()
+      .then(() => void getCurrentWindow().setFocus());
   }, []);
 
   return (
