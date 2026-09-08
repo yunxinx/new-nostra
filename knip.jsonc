@@ -1,19 +1,23 @@
 {
-  "project": ["src/**/*.{ts,tsx}"],
+  "project": ["src/**/*.{ts,tsx}", "src/**/*.css"],
+  // The vite plugin discovers entry scripts from index.html only (hardcoded
+  // file name), so the settings window entry is declared here; its subtree
+  // stays within analysis. CSS files join `project` so their @imports of
+  // tailwindcss / shadcn / font packages are followed (imports of compiled
+  // extensions outside `project` are not).
+  "entry": ["src/settings-main.tsx"],
   "ignoreExportsUsedInFile": false,
-  // Settings window entry files. knip's vite plugin discovers entry scripts
-  // from index.html only (hardcoded file name), so these cannot be
-  // auto-detected.
-  "ignore": [
-    "src/settings-main.tsx",
-    "src/features/settings/SettingsWindowApp.tsx",
-  ],
-  // 1. shadcn generator emits the full dropdown-menu variant set; trimming to
+  // Part of the settings-form control trio (PRD .trellis/tasks/09-08-settings-ui);
+  // no boolean preference row exists until the logs-domain settings land.
+  "ignore": ["src/components/ui/switch.tsx"],
+  // 1. shadcn generator emits the full component variant set; trimming to
   //    only what is used would churn on every regeneration.
   // 2. SessionGroupKey / MockMessage complete their modules' public surface
   //    for the upcoming session-domain consumers.
   "ignoreIssues": {
     "src/components/ui/dropdown-menu.tsx": ["exports"],
+    "src/components/ui/popover.tsx": ["exports"],
+    "src/components/ui/select.tsx": ["exports"],
     "src/features/sessions/grouping.ts": ["types"],
     "src/features/sessions/mock.ts": ["types"],
   },

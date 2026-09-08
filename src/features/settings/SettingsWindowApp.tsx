@@ -1,23 +1,35 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "cn";
+import { Info, type LucideIcon, Palette, Settings2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useTheme } from "@/features/appearance/use-theme";
 
-const SETTINGS_TABS = ["general", "appearance"] as const;
+import { AboutPage } from "./components/AboutPage";
+import { AppearancePage } from "./components/AppearancePage";
+import { GeneralPage } from "./components/GeneralPage";
 
-type SettingsTab = (typeof SETTINGS_TABS)[number];
+const SETTINGS_PAGES = ["general", "appearance", "about"] as const;
 
-const TAB_TITLE_KEYS = {
+type SettingsPage = (typeof SETTINGS_PAGES)[number];
+
+const PAGE_ICONS: Record<SettingsPage, LucideIcon> = {
+  about: Info,
+  appearance: Palette,
+  general: Settings2,
+};
+
+const PAGE_TITLE_KEYS = {
+  about: "settings.tabs.about",
   appearance: "settings.tabs.appearance",
   general: "settings.tabs.general",
-} as const satisfies Record<SettingsTab, string>;
+} as const satisfies Record<SettingsPage, string>;
 
 export function SettingsWindowApp() {
   const { t } = useTranslation();
   useTheme();
-  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  const [activePage, setActivePage] = useState<SettingsPage>("general");
 
   // The window is created hidden; this mount effect runs after React's first
   // commit, so show() reveals painted content. Idempotent under StrictMode
@@ -33,41 +45,52 @@ export function SettingsWindowApp() {
             traffic lights through this spacer. */}
         <div className="h-[34px] shrink-0" data-tauri-drag-region />
         <div className="flex flex-col gap-1 p-2">
-          {SETTINGS_TABS.map((tab) => (
-            <button
-              aria-current={tab === activeTab ? "true" : undefined}
-              className={cn(
-                "text-sidebar-foreground focus-visible:ring-ring/50 flex h-[30px] w-full cursor-default items-center rounded-[6px] px-2 text-left text-sm outline-none select-none focus-visible:ring-3",
-                // Full-width row: the arrow cursor marks it as a row
-                // selection, not a button press. The hover variant
-                // out-specifies a plain selected class, so the selected tab
-                // must not carry the hover class at all.
-                tab === activeTab
-                  ? "bg-sidebar-selected text-sidebar-accent-foreground"
-                  : "hover:bg-sidebar-accent",
-              )}
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              type="button"
-            >
-              {t(TAB_TITLE_KEYS[tab])}
-            </button>
-          ))}
+          {SETTINGS_PAGES.map((page) => {
+            const PageIcon = PAGE_ICONS[page];
+            return (
+              <button
+                aria-current={page === activePage ? "true" : undefined}
+                className={cn(
+                  "text-sidebar-foreground focus-visible:ring-ring/50 flex h-[30px] w-full cursor-default items-center gap-2 rounded-[6px] px-2 text-left text-sm outline-none select-none focus-visible:ring-3",
+                  // Full-width row: the arrow cursor marks it as a row
+                  // selection, not a button press. The hover variant
+                  // out-specifies a plain selected class, so the selected tab
+                  // must not carry the hover class at all.
+                  page === activePage
+                    ? "bg-sidebar-selected text-sidebar-accent-foreground"
+                    : "hover:bg-sidebar-accent",
+                )}
+                key={page}
+                onClick={() => setActivePage(page)}
+                type="button"
+              >
+                {/* 80%-opacity icon in the row's current text color; sits a
+                    step back from the label like the old app's nav icons. */}
+                <PageIcon className="size-4 shrink-0 opacity-80" />
+                {t(PAGE_TITLE_KEYS[page])}
+              </button>
+            );
+          })}
         </div>
       </nav>
       <main className="bg-background flex min-w-0 flex-1 flex-col">
         {/* Reserved title row: drag surface for the content column. */}
         <div className="h-[34px] shrink-0" data-tauri-drag-region />
-        {/* Flat rows without card chrome, matching the main window's
-            borderless pane split; real settings items land in the settings
-            domain task. */}
-        <div className="p-6">
-          <h1 className="text-sm font-semibold">
-            {t(TAB_TITLE_KEYS[activeTab])}
-          </h1>
-          <p className="text-muted-foreground mt-1 text-sm">
-            {t("settings.placeholder")}
-          </p>
+        {/* Shared vertical scroll for the form pages; rows carry their own
+            rhythm with no card chrome. The About page centers itself
+            instead of joining the padded form column. */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {activePage === "about" ? (
+            <AboutPage />
+          ) : (
+            <div className="px-10 pb-4">
+              {activePage === "appearance" ? (
+                <AppearancePage />
+              ) : (
+                <GeneralPage />
+              )}
+            </div>
+          )}
         </div>
       </main>
     </div>

@@ -15,6 +15,7 @@ import { MessageList } from "@/features/chat/components/MessageList";
 import { Sidebar } from "@/features/sessions/components/Sidebar";
 import { SidebarToggleButton } from "@/features/sessions/components/SidebarToggleButton";
 import { MOCK_SESSIONS } from "@/features/sessions/mock";
+import { useSidebarPersistence } from "@/features/sessions/use-sidebar-persistence";
 import { useShortcuts } from "@/hooks/use-shortcuts";
 import { useUiStore } from "@/stores/ui-store";
 
@@ -22,6 +23,7 @@ export function App() {
   const { t } = useTranslation();
   useTheme();
   useShortcuts();
+  useSidebarPersistence();
   const setActiveSession = useUiStore((s) => s.setActiveSession);
   const activeSessionId = useUiStore((s) => s.activeSessionId);
 

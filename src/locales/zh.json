@@ -41,10 +41,25 @@
     }
   },
   "settings": {
-    "placeholder": "设置项将在后续版本提供。",
+    "language": "界面语言",
+    "languageDesc": "应用界面所使用的语言。",
+    "themeMode": "主题模式",
+    "themeModeDesc": "跟随系统外观，或固定使用浅色/深色。",
+    "themeModes": {
+      "system": "跟随系统",
+      "light": "浅色",
+      "dark": "深色"
+    },
+    "about": {
+      "version": "版本 {{version}}",
+      "description": "基于 Tauri 2 与 React 构建的桌面聊天客户端。",
+      "license": "基于 Apache License 2.0 许可发布。"
+    },
+    "moreInformation": "更多信息",
     "tabs": {
       "general": "通用",
-      "appearance": "外观"
+      "appearance": "外观",
+      "about": "关于"
     }
   },
   "errors": {

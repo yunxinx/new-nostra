@@ -15,6 +15,7 @@
     "process:default",
     "clipboard-manager:default",
     "dialog:default",
-    "opener:default"
+    "opener:default",
+    "store:default"
   ]
 }

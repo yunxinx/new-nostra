@@ -4,6 +4,9 @@ import { initReactI18next } from "react-i18next";
 import en from "@/locales/en.json";
 import zh from "@/locales/zh.json";
 
+// Supported interface languages; persisted under PREFERENCE_KEYS.language.
+export type Language = "en" | "zh";
+
 export function initI18n(): void {
   const language = navigator.language.toLowerCase().startsWith("zh")
     ? "zh"

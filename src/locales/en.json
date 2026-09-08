@@ -41,10 +41,25 @@
     }
   },
   "settings": {
-    "placeholder": "Settings options will arrive in a future release.",
+    "language": "Interface language",
+    "languageDesc": "Language used across the app UI.",
+    "themeMode": "Theme mode",
+    "themeModeDesc": "Follow the system appearance, or always use light / dark.",
+    "themeModes": {
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark"
+    },
+    "about": {
+      "version": "Version {{version}}",
+      "description": "A desktop chat client built with Tauri 2 and React.",
+      "license": "Released under the Apache License 2.0."
+    },
+    "moreInformation": "More information",
     "tabs": {
       "general": "General",
-      "appearance": "Appearance"
+      "appearance": "Appearance",
+      "about": "About"
     }
   },
   "errors": {

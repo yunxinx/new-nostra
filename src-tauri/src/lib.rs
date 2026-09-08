@@ -60,6 +60,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             let connection = db::init(app.handle())?;
             app.manage(state::AppState { db: tokio::sync::Mutex::new(connection) });
