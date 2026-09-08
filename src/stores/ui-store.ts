@@ -8,12 +8,14 @@ const SIDEBAR_MIN_WIDTH = 220;
 
 interface UiState {
   activeSessionId: null | string;
+  draftId: number;
   setActiveSession: (id: null | string) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setSidebarWidth: (width: number) => void;
   setThemeOverride: (override: ThemeOverride) => void;
   sidebarCollapsed: boolean;
   sidebarWidth: number;
+  startNewChat: () => void;
   themeOverride: ThemeOverride;
   toggleSidebarCollapsed: () => void;
 }
@@ -21,6 +23,7 @@ interface UiState {
 export const useUiStore = create<UiState>()(
   immer((set) => ({
     activeSessionId: null,
+    draftId: 0,
     setActiveSession: (activeSessionId) =>
       set((state) => {
         state.activeSessionId = activeSessionId;
@@ -44,6 +47,11 @@ export const useUiStore = create<UiState>()(
       }),
     sidebarCollapsed: false,
     sidebarWidth: 272,
+    startNewChat: () =>
+      set((state) => {
+        state.activeSessionId = null;
+        state.draftId += 1;
+      }),
     themeOverride: "system",
     toggleSidebarCollapsed: () =>
       set((state) => {

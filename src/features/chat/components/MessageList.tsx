@@ -1,5 +1,5 @@
 import { ArrowDown } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -55,12 +55,12 @@ export function MessageList({ hasSessions, messages }: MessageListProps) {
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const scrollContainer = scrollRef.current;
     if (isNearBottom && scrollContainer) {
       scrollContainer.scrollTop = scrollContainer.scrollHeight;
     }
-  }, [allMessages.length, isNearBottom]);
+  }, [allMessages.length, composerHeight, isNearBottom]);
 
   function handleScroll(): void {
     const scrollContainer = scrollRef.current;

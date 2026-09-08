@@ -96,13 +96,14 @@ export function hslToHex(hsl: Hsl): string {
 
 export function parseHex(hex: string): Rgb {
   const value = hex.trim().replace(/^#/, "");
-  if (!/^[0-9a-fA-F]{6}$/.test(value)) {
-    throw new Error(`expected a #rrggbb colour, got "${hex}"`);
+  if (!/^(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value)) {
+    throw new Error(`expected a #rgb or #rrggbb colour, got "${hex}"`);
   }
+  const expanded = value.length === 3 ? value.replaceAll(/./g, "$&$&") : value;
   return {
-    b: Number.parseInt(value.slice(4, 6), 16),
-    g: Number.parseInt(value.slice(2, 4), 16),
-    r: Number.parseInt(value.slice(0, 2), 16),
+    b: Number.parseInt(expanded.slice(4, 6), 16),
+    g: Number.parseInt(expanded.slice(2, 4), 16),
+    r: Number.parseInt(expanded.slice(0, 2), 16),
   };
 }
 

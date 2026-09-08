@@ -6,6 +6,7 @@ describe("useUiStore", () => {
   beforeEach(() => {
     useUiStore.setState({
       activeSessionId: null,
+      draftId: 0,
       sidebarCollapsed: false,
       sidebarWidth: 272,
       themeOverride: "system",
@@ -50,6 +51,25 @@ describe("useUiStore", () => {
   it("setThemeOverride updates the override slice", () => {
     useUiStore.getState().setThemeOverride("dark");
     expect(useUiStore.getState().themeOverride).toBe("dark");
+  });
+
+  it("starts a fresh draft from a selected session or an existing draft", () => {
+    const store = useUiStore.getState();
+    store.setActiveSession("session-1");
+    store.setSidebarWidth(320);
+    store.setThemeOverride("dark");
+
+    store.startNewChat();
+    const firstDraft = useUiStore.getState();
+    expect(firstDraft.activeSessionId).toBeNull();
+    expect(firstDraft.draftId).not.toBe(store.draftId);
+
+    firstDraft.startNewChat();
+    const secondDraft = useUiStore.getState();
+    expect(secondDraft.activeSessionId).toBeNull();
+    expect(secondDraft.draftId).not.toBe(firstDraft.draftId);
+    expect(secondDraft.sidebarWidth).toBe(320);
+    expect(secondDraft.themeOverride).toBe("dark");
   });
 
   it("replaces state immutably on updates (immer middleware)", () => {

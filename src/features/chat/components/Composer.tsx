@@ -43,6 +43,13 @@ export function Composer({ onSend }: ComposerProps) {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    // IME confirmation can arrive after compositionend. Remove this fallback
+    // when supported WebViews report those keydowns as isComposing.
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    const isCompositionKey = event.nativeEvent.keyCode === 229;
+    if (event.nativeEvent.isComposing || isCompositionKey) {
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       handleSubmit();

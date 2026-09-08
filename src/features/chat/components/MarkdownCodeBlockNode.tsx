@@ -2,7 +2,7 @@ import type { NodeComponentProps } from "markstream-react";
 
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Check, Copy } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -11,7 +11,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-import { highlightCode, normalizeLanguage } from "../highlighter";
+import {
+  highlightCode,
+  type HighlightedToken,
+  normalizeLanguage,
+} from "../highlighter";
 
 interface CodeBlockNodeData {
   code: string;
@@ -19,25 +23,37 @@ interface CodeBlockNodeData {
   type: "code_block";
 }
 
+interface HighlightedCode {
+  code: string;
+  isDark: boolean;
+  language: string;
+  tokens: HighlightedToken[][] | null;
+}
+
 const COPY_FEEDBACK_MS = 1500;
 
-// Shiki output is sanitized at the source: hast serialization escapes the
-// code text, so the HTML can be mounted directly.
+// React applies token styles through CSSOM, which the CSP permits.
 export function MarkdownCodeBlockNode({
   isDark = false,
   node,
 }: NodeComponentProps<CodeBlockNodeData>) {
   const { t } = useTranslation();
-  const [html, setHtml] = useState<null | string>(null);
+  const [highlighted, setHighlighted] = useState<HighlightedCode | null>(null);
   const [isCopied, setIsCopied] = useState(false);
   const language = normalizeLanguage(node.language);
   const code = node.code;
+  const tokens =
+    highlighted?.code === code &&
+    highlighted.language === node.language &&
+    highlighted.isDark === isDark
+      ? highlighted.tokens
+      : null;
 
   useEffect(() => {
     let isCancelled = false;
-    void highlightCode(code, node.language, isDark).then((highlighted) => {
+    void highlightCode(code, node.language, isDark).then((tokens) => {
       if (!isCancelled) {
-        setHtml(highlighted);
+        setHighlighted({ code, isDark, language: node.language, tokens });
       }
     });
     return () => {
@@ -59,14 +75,14 @@ export function MarkdownCodeBlockNode({
   }
 
   return (
-    <div className="border-border overflow-hidden rounded-[6px] border">
-      <div className="bg-code-header text-muted-foreground flex cursor-default items-center justify-between px-3 py-1 select-none">
+    <div className="border-chat-border overflow-hidden rounded-[6px] border">
+      <div className="bg-code-header text-chat-muted-foreground flex cursor-default items-center justify-between px-3 py-1 select-none">
         <span className="text-[13px]">{language}</span>
         <Tooltip>
           <TooltipTrigger asChild>
             <button
               aria-label={t("chat.copyCode")}
-              className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:ring-ring/50 flex size-5 items-center justify-center rounded-[6px] outline-none focus-visible:ring-3"
+              className="text-chat-muted-foreground hover:bg-chat-foreground/10 hover:text-chat-foreground focus-visible:ring-ring/50 flex size-5 items-center justify-center rounded-[6px] outline-none focus-visible:ring-3"
               onClick={() => void handleCopy()}
               type="button"
             >
@@ -80,21 +96,25 @@ export function MarkdownCodeBlockNode({
           <TooltipContent>{t("chat.copyCode")}</TooltipContent>
         </Tooltip>
       </div>
-      {/* Header py-1 + body pt-2 keeps the 12px header-to-code gap.
-          Body bottom padding is 12px unconditionally; the old app shrank it
-          to 2px when content overflowed horizontally — detecting overflow
-          is not done here. select-text/cursor-text keep code copyable under
-          the body-wide no-selection backout. */}
-      {html !== null ? (
-        <div
-          className="bg-muted text-foreground cursor-text overflow-x-auto px-3 pt-2 pb-3 font-mono text-[13px] leading-relaxed select-text"
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
-      ) : (
-        <pre className="bg-muted text-foreground cursor-text overflow-x-auto px-3 pt-2 pb-3 font-mono text-[13px] leading-relaxed select-text">
-          <code>{code}</code>
-        </pre>
-      )}
+      <pre
+        className="bg-chat-muted text-chat-foreground cursor-text overflow-x-auto px-3 pt-2 pb-3 font-mono text-[13px] leading-relaxed select-text"
+        tabIndex={0}
+      >
+        <code>
+          {tokens === null
+            ? code
+            : tokens.map((line, lineIndex) => (
+                <Fragment key={lineIndex}>
+                  {lineIndex > 0 && "\n"}
+                  {line.map((token) => (
+                    <span key={token.offset} style={token.style}>
+                      {token.content}
+                    </span>
+                  ))}
+                </Fragment>
+              ))}
+        </code>
+      </pre>
     </div>
   );
 }

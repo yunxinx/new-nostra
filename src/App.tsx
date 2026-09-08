@@ -26,6 +26,8 @@ export function App() {
   useSidebarPersistence();
   const setActiveSession = useUiStore((s) => s.setActiveSession);
   const activeSessionId = useUiStore((s) => s.activeSessionId);
+  const draftId = useUiStore((s) => s.draftId);
+  const startNewChat = useUiStore((s) => s.startNewChat);
 
   // The window is created hidden (geometry restores offscreen of view).
   // WebKit never schedules requestAnimationFrame while the host window is
@@ -85,7 +87,7 @@ export function App() {
             // domain replaces the data source without touching the components.
             <MessageList
               hasSessions={sessions.length > 0}
-              key="draft"
+              key={`draft-${String(draftId)}`}
               messages={[]}
             />
           )}
@@ -97,7 +99,7 @@ export function App() {
           <TooltipTrigger asChild>
             <Button
               aria-label={t("app.newChat")}
-              onClick={() => setActiveSession(null)}
+              onClick={startNewChat}
               size="icon-sm"
               variant="ghost"
             >

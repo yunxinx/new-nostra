@@ -55,6 +55,23 @@ function derivedSidebar(
   );
 }
 
+describe("parseHex", () => {
+  it.each([
+    ["#fff", { b: 255, g: 255, r: 255 }],
+    [" #aBc ", { b: 204, g: 187, r: 170 }],
+    ["#22272e", { b: 46, g: 39, r: 34 }],
+  ])("reads opaque CSS hex color %s", (input, expected) => {
+    expect(parseHex(input)).toEqual(expected);
+  });
+
+  it.each(["#ff", "#ffff", "#ggg", "#ffffff00", ""])(
+    "rejects unsupported color %s",
+    (input) => {
+      expect(() => parseHex(input)).toThrow();
+    },
+  );
+});
+
 describe("ratio", () => {
   it("is 1 for identical colours and 21 for black against white", () => {
     const gray = parseHex("#444c56");

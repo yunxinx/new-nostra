@@ -1,6 +1,32 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeLanguage } from "./highlighter";
+import { highlightCode, normalizeLanguage } from "./highlighter";
+
+describe("highlightCode", () => {
+  it.each([true, false])("preserves code text with dark=%s", async (isDark) => {
+    const code = 'const text = "<script>&</script>";\n\nconsole.log(text);\n';
+    const tokens = await highlightCode(code, "ts", isDark);
+    expect(tokens).not.toBeNull();
+    expect(
+      tokens
+        ?.map((line) => line.map((token) => token.content).join(""))
+        .join("\n"),
+    ).toBe(code);
+    expect(
+      new Set(tokens?.flat().map((token) => token.style.color)).size,
+    ).toBeGreaterThan(1);
+  });
+
+  it("preserves unknown-language text without interpreting markup", async () => {
+    const code = '<img src=x onerror="alert(1)">\n& < >';
+    const tokens = await highlightCode(code, "not-a-language", false);
+    expect(
+      tokens
+        ?.map((line) => line.map((token) => token.content).join(""))
+        .join("\n"),
+    ).toBe(code);
+  });
+});
 
 describe("normalizeLanguage", () => {
   it("maps common aliases to registered grammars", () => {

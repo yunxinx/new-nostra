@@ -15,6 +15,9 @@ const SETTINGS_WINDOW_HEIGHT = 680;
 export async function openSettings(): Promise<void> {
   const existing = await WebviewWindow.getByLabel(SETTINGS_WINDOW_LABEL);
   if (existing) {
+    if (await existing.isMinimized()) {
+      await existing.unminimize();
+    }
     await existing.setFocus();
     return;
   }

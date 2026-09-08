@@ -48,7 +48,24 @@ export default defineConfig(() => {
       },
     },
     test: {
-      environment: "node",
+      projects: [
+        {
+          extends: true,
+          test: {
+            environment: "node",
+            include: ["src/**/*.test.ts"],
+            name: "unit",
+          },
+        },
+        {
+          extends: true,
+          test: {
+            environment: "jsdom",
+            include: ["src/**/*.test.tsx"],
+            name: "components",
+          },
+        },
+      ],
     },
   };
 });

@@ -1,5 +1,11 @@
+import type { CSSProperties } from "react";
+
 import { createJavaScriptRegexEngine } from "@shikijs/engine-javascript";
-import { createHighlighterCore, type ShikiTransformer } from "shiki/core";
+import {
+  createHighlighterCore,
+  getTokenStyleObject,
+  type ThemedToken,
+} from "shiki/core";
 import bash from "shiki/langs/bash.mjs";
 import javascript from "shiki/langs/javascript.mjs";
 import json from "shiki/langs/json.mjs";
@@ -35,14 +41,11 @@ const LANG_ALIASES: Record<string, string> = {
   zsh: "bash",
 };
 
-// The code surface comes from the muted token so blocks match the app
-// palette; Shiki's per-theme background would fight it.
-const STRIP_CODE_BACKGROUND: ShikiTransformer = {
-  name: "nostra:strip-code-background",
-  pre(node) {
-    delete node.properties.style;
-  },
-};
+export interface HighlightedToken {
+  content: string;
+  offset: number;
+  style: CSSProperties;
+}
 
 // Module-level creation prewarms the grammars and themes on first import;
 // the JavaScript regex engine avoids loading oniguruma WASM.
@@ -53,25 +56,31 @@ const highlighterPromise = createHighlighterCore({
 });
 
 /**
- * Highlights one complete code fence to an HTML string.
+ * Tokenizes one complete code fence for React rendering.
  * Constraint: unknown languages fall back to a plaintext block.
- * Failure: never rejects; engine failures also fall back to plaintext.
+ * Failure: returns null on engine failure so the caller renders plain text.
  */
 export async function highlightCode(
   code: string,
   rawLanguage: string,
   isDark: boolean,
-): Promise<string> {
+): Promise<HighlightedToken[][] | null> {
   const language = normalizeLanguage(rawLanguage);
   try {
     const highlighter = await highlighterPromise;
-    return highlighter.codeToHtml(code, {
+    const { tokens } = highlighter.codeToTokens(code, {
       lang: language,
       theme: isDark ? DARK_THEME : LIGHT_THEME,
-      transformers: [STRIP_CODE_BACKGROUND],
     });
+    return tokens.map((line) =>
+      line.map((token) => ({
+        content: token.content,
+        offset: token.offset,
+        style: tokenStyle(token),
+      })),
+    );
   } catch {
-    return `<pre><code>${escapeHtml(code)}</code></pre>`;
+    return null;
   }
 }
 
@@ -81,9 +90,13 @@ export function normalizeLanguage(rawLanguage: string): string {
   return SUPPORTED_LANGS.has(resolved) ? resolved : "plaintext";
 }
 
-function escapeHtml(text: string): string {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+function tokenStyle(token: ThemedToken): CSSProperties {
+  const styles = getTokenStyleObject(token);
+  return {
+    backgroundColor: styles["background-color"],
+    color: styles.color,
+    fontStyle: styles["font-style"] === "italic" ? "italic" : undefined,
+    fontWeight: styles["font-weight"] === "bold" ? "bold" : undefined,
+    textDecoration: styles["text-decoration"],
+  };
 }

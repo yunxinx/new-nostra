@@ -47,6 +47,10 @@
   --color-background: var(--background);
   --color-selection: var(--selection);
   --color-code-header: var(--code-header);
+  --color-chat-border: var(--chat-border);
+  --color-chat-foreground: var(--chat-foreground);
+  --color-chat-muted: var(--chat-muted);
+  --color-chat-muted-foreground: var(--chat-muted-foreground);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   /* lg = 8px per the old app's radius scale (base 6px, lg 8px). */
@@ -216,6 +220,11 @@
    text: copying prose is a legitimate need, and the I-beam over selectable
    text is the correct cursor semantics there. */
 .chat-markdown {
+  /* Resolve application colors outside the renderer's HSL variable scope. */
+  --chat-border: var(--border);
+  --chat-foreground: var(--foreground);
+  --chat-muted: var(--muted);
+  --chat-muted-foreground: var(--muted-foreground);
   font-size: 0.875rem;
   line-height: 1.5;
   user-select: text;
@@ -250,7 +259,7 @@
   border: 0;
   padding: 0.1em 0.35em;
   border-radius: 4px;
-  background: var(--muted);
+  background: var(--chat-muted);
   font-size: 0.875em;
 }
 .chat-markdown .list-node {
@@ -266,9 +275,9 @@
 }
 .chat-markdown .blockquote-node {
   margin: 0;
-  border-left: 2px solid var(--border);
+  border-left: 2px solid var(--chat-border);
   padding-left: 0.75em;
-  color: var(--muted-foreground);
+  color: var(--chat-muted-foreground);
 }
 .chat-markdown .table-node {
   margin: 0;
@@ -277,7 +286,7 @@
 }
 .chat-markdown .table-node th,
 .chat-markdown .table-node td {
-  border: 1px solid var(--border);
+  border: 1px solid var(--chat-border);
   padding: 0.25em 0.6em;
   text-align: left;
 }

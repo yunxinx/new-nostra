@@ -90,6 +90,7 @@ export function Sidebar({
         // resize the width must track the pointer without lag.
         !isResizing && "transition-[width] duration-[220ms] ease-in-out",
       )}
+      inert={sidebarCollapsed}
       style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
     >
       {/* Inner column keeps a fixed width so content does not reflow while

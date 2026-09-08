@@ -19,7 +19,7 @@ export function useShortcuts(): void {
         useUiStore.getState().toggleSidebarCollapsed();
       } else if (key === "n" && !event.shiftKey) {
         event.preventDefault();
-        useUiStore.getState().setActiveSession(null);
+        useUiStore.getState().startNewChat();
       } else if (key === "l" && event.shiftKey) {
         event.preventDefault();
         toggleTheme();
