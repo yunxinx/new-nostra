@@ -3,35 +3,15 @@ import { CheckIcon, ChevronRightIcon } from "lucide-react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import * as React from "react";
 
-// Last input modality, shared by every menu in the window: Radix returns
-// focus to the trigger whenever a menu closes, which leaves a lingering
-// focus ring for pointer users — worst when the chosen action unfocuses
-// the window (opening the settings window) and nothing clears the ring
-// until the next click. A keyboard user's focus must return to a
-// predictable place, so only pointer-initiated closes skip the return.
-// Written by document-level capture listeners (installed from Root, which
-// is mounted before the opening interaction can reach the Content), read
-// in onCloseAutoFocus at close time. Blur carries no pointer or key
-// events, so an unfocused window keeps its last recorded modality.
-let lastInputWasPointer = false;
+import {
+  suppressPointerFocusReturn,
+  trackPointerModality,
+} from "@/lib/pointer-modality";
 
 function DropdownMenu({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
-  React.useEffect(() => {
-    const markPointerInput = () => {
-      lastInputWasPointer = true;
-    };
-    const markKeyboardInput = () => {
-      lastInputWasPointer = false;
-    };
-    document.addEventListener("keydown", markKeyboardInput, true);
-    document.addEventListener("pointerdown", markPointerInput, true);
-    return () => {
-      document.removeEventListener("keydown", markKeyboardInput, true);
-      document.removeEventListener("pointerdown", markPointerInput, true);
-    };
-  }, []);
+  React.useEffect(trackPointerModality, []);
   return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
 }
 
@@ -281,17 +261,6 @@ function DropdownMenuTrigger({
       {...props}
     />
   );
-}
-
-// The pointer-close guard shared by Content and SubContent (see the
-// modality note above). A caller-provided handler runs after the guard.
-function suppressPointerFocusReturn(onCloseAutoFocus?: (event: Event) => void) {
-  return (event: Event) => {
-    if (lastInputWasPointer) {
-      event.preventDefault();
-    }
-    onCloseAutoFocus?.(event);
-  };
 }
 
 export {

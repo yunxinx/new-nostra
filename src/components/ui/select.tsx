@@ -3,17 +3,31 @@ import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Select as SelectPrimitive } from "radix-ui";
 import * as React from "react";
 
+import {
+  suppressPointerFocusReturn,
+  trackPointerModality,
+} from "@/lib/pointer-modality";
+
 function Select({
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Root>) {
+  React.useEffect(trackPointerModality, []);
   return <SelectPrimitive.Root data-slot="select" {...props} />;
 }
 
+// Popper aligns the panel box to the trigger box. Radix's other mode,
+// item-aligned, aligns the selected item's *text* to the trigger's text, which
+// puts the panel edge at `trigger.left + (trigger text inset - item text
+// inset)` and leaks a sliver of the trigger underneath unless both insets match
+// to the pixel: do not use it, that coupling breaks on any padding or border
+// change. The translate-* classes carry the gap to the trigger, so no
+// sideOffset.
 function SelectContent({
-  align = "center",
+  align = "start",
   children,
   className,
-  position = "item-aligned",
+  onCloseAutoFocus,
+  position = "popper",
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
   return (
@@ -21,24 +35,16 @@ function SelectContent({
       <SelectPrimitive.Content
         align={align}
         className={cn(
-          "bg-popover text-popover-foreground ring-foreground/10 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 relative z-50 max-h-(--radix-select-content-available-height) min-w-36 origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-lg shadow-md ring-1 duration-100 data-[align-trigger=true]:animate-none",
-          position === "popper" &&
-            "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
+          "bg-popover text-popover-foreground ring-foreground/10 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 relative z-50 max-h-(--radix-select-content-available-height) min-w-36 origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-lg shadow-md ring-1 duration-100 data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
           className,
         )}
-        data-align-trigger={position === "item-aligned"}
         data-slot="select-content"
+        onCloseAutoFocus={suppressPointerFocusReturn(onCloseAutoFocus)}
         position={position}
         {...props}
       >
         <SelectScrollUpButton />
-        <SelectPrimitive.Viewport
-          className={cn(
-            "data-[position=popper]:h-(--radix-select-trigger-height) data-[position=popper]:w-full data-[position=popper]:min-w-(--radix-select-trigger-width)",
-            position === "popper" && "",
-          )}
-          data-position={position}
-        >
+        <SelectPrimitive.Viewport className="w-full min-w-(--radix-select-trigger-width)">
           {children}
         </SelectPrimitive.Viewport>
         <SelectScrollDownButton />

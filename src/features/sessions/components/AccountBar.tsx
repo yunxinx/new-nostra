@@ -83,7 +83,7 @@ export function AccountBar() {
                 }}
                 type="button"
               >
-                <span className="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-full text-xs font-medium">
+                <span className="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-full text-xs leading-none font-medium">
                   {ACCOUNT_PLACEHOLDER_NAME.charAt(0)}
                 </span>
                 <span className="text-sidebar-foreground text-sm font-medium">

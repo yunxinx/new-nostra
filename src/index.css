@@ -150,8 +150,8 @@
      selection, even visually empty chrome, so the default is inverted:
      body-wide no-selection + arrow cursor, with selectability whitelisted
      where copying is a legitimate need (.chat-markdown below, code block
-     bodies, the composer textarea). Buttons still override with the hand
-     cursor via the rule further down. */
+     bodies, the user bubble, the composer textarea). Buttons still override
+     with the hand cursor via the rule further down. */
   body {
     @apply bg-background text-foreground cursor-default select-none;
   }
