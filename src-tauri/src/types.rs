@@ -73,6 +73,18 @@ pub struct SessionCursor {
     pub id: String,
 }
 
+/// One window of a session's active path. `entries` are always ordered
+/// oldest-to-newest; each cursor carries the id of the page's boundary entry
+/// and is `Some` only when the path continues past that boundary.
+#[derive(Debug, Clone)]
+pub struct PathPage {
+    pub entries: Vec<Entry>,
+    /// Oldest entry in the page; `Some` only when an older parent remains.
+    pub prev_cursor: Option<String>,
+    /// Newest entry in the page; `Some` only when an active-path successor remains.
+    pub next_cursor: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -6,12 +6,6 @@ use crate::types::{ContentBlock, CreatedSession, Session, SessionCursor, Session
 
 const MAX_PAGE_SIZE: u32 = 50;
 
-/// SQLite-generated RFC 3339 UTC timestamp with fixed millisecond precision, so
-/// lexical order equals chronological order. Taken once per transaction.
-fn now_utc(conn: &Connection) -> Result<String, AppError> {
-    Ok(conn.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| row.get(0))?)
-}
-
 fn clamp_limit(limit: Option<u32>) -> u32 {
     limit.unwrap_or(MAX_PAGE_SIZE).clamp(1, MAX_PAGE_SIZE)
 }
@@ -42,7 +36,7 @@ pub fn create(
     }
 
     let tx = conn.unchecked_transaction()?;
-    let now = now_utc(&tx)?;
+    let now = entries::now_utc(&tx)?;
     let id = uuid::Uuid::now_v7().to_string();
 
     tx.prepare_cached(
@@ -228,7 +222,7 @@ mod tests {
     fn append_chain(conn: &Connection, session_id: &str, len: usize) {
         for i in 0..len {
             let tx = conn.unchecked_transaction().unwrap();
-            let now = now_utc(&tx).unwrap();
+            let now = entries::now_utc(&tx).unwrap();
             let leaf: Option<String> = tx
                 .query_row(
                     "SELECT active_leaf_id FROM sessions WHERE id = ?1",
@@ -415,7 +409,7 @@ mod tests {
         // A second, independent root with its own branch.
         {
             let tx = conn.unchecked_transaction().unwrap();
-            let now = now_utc(&tx).unwrap();
+            let now = entries::now_utc(&tx).unwrap();
             let root_b =
                 entries::append_in_transaction(&tx, session_id, None, &text("root-b"), &now)
                     .unwrap();
@@ -450,7 +444,7 @@ mod tests {
 
         let orphans: i64 = conn
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0))
-            .unwrap_or(0);
+            .unwrap();
         assert_eq!(orphans, 0, "foreign key check must find no orphans");
     }
 

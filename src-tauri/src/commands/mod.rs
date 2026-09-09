@@ -1,5 +1,6 @@
 //! IPC boundary. `generate_handler!` below is the single command registry.
 
+mod entries;
 mod sessions;
 
 use tauri::ipc::Invoke;
@@ -12,5 +13,11 @@ pub fn handler() -> impl Fn(Invoke) -> bool + Send + Sync + 'static {
         sessions::rename_session,
         sessions::set_session_pinned,
         sessions::delete_session,
+        entries::append_message,
+        entries::load_active_path,
+        entries::load_active_path_before,
+        entries::load_active_path_after,
+        entries::delete_entry,
+        entries::set_active_leaf,
     ]
 }
