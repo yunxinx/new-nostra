@@ -15,6 +15,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { useUiStore } from "@/stores/ui-store";
 
 import {
   useDeleteSession,
@@ -150,6 +151,10 @@ export function SessionRow({ isActive, onSelect, session }: SessionRowProps) {
 function DeleteConfirmForm({ onClose, session }: SessionActionFormProps) {
   const { t } = useTranslation();
   const remove = useDeleteSession();
+  // A pending send for the same session blocks the delete: the two writes
+  // are mutually exclusive and the composer already refuses while a delete
+  // is in flight.
+  const isSendPending = useUiStore((s) => s.pendingSubmits.has(session.id));
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -172,7 +177,7 @@ function DeleteConfirmForm({ onClose, session }: SessionActionFormProps) {
           {t("common.cancel")}
         </Button>
         <Button
-          disabled={remove.isPending}
+          disabled={remove.isPending || isSendPending}
           onClick={() =>
             remove.mutate({ sessionId: session.id }, { onSuccess: onClose })
           }

@@ -1,6 +1,8 @@
 import { ArrowUp, Plus } from "lucide-react";
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+
+import type { AppError } from "@/types/ipc";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -14,12 +16,24 @@ const LINE_HEIGHT_PX = 20;
 const MAX_TEXT_HEIGHT_PX = 8 * LINE_HEIGHT_PX;
 
 interface ComposerProps {
+  // In-flight submit for this target, or in-flight delete of the session:
+  // the field and button stay inert until the write settles.
+  disabled: boolean;
+  // Last submit failure; the input below it is retained for retry.
+  error: AppError | null;
   onSend: (text: string) => void;
+  onTextChange: (text: string) => void;
+  value: string;
 }
 
-export function Composer({ onSend }: ComposerProps) {
+export function Composer({
+  disabled,
+  error,
+  onSend,
+  onTextChange,
+  value,
+}: ComposerProps) {
   const { t } = useTranslation();
-  const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -35,11 +49,12 @@ export function Composer({ onSend }: ComposerProps) {
 
   function handleSubmit(): void {
     const text = value.trim();
-    if (!text) {
+    if (disabled || text.length === 0) {
       return;
     }
+    // The draft clears only after the write is confirmed persisted; a
+    // failure keeps the input for a manual retry.
     onSend(text);
-    setValue("");
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -56,6 +71,10 @@ export function Composer({ onSend }: ComposerProps) {
     }
   }
 
+  const sendLabel = disabled
+    ? t("chat.composer.sending")
+    : t("chat.composer.send");
+
   return (
     <div className="bg-background border-border flex flex-col gap-0.5 rounded-lg border p-1 shadow-md">
       {/* select-text/cursor-text whitelist the field under the body-wide
@@ -63,14 +82,20 @@ export function Composer({ onSend }: ComposerProps) {
           arrow cursor instead of the I-beam. */}
       <textarea
         aria-label={t("chat.composer.placeholder")}
-        className="text-foreground placeholder:text-muted-foreground max-h-40 w-full cursor-text resize-none bg-transparent px-2 py-1.5 text-sm leading-5 outline-none select-text"
-        onChange={(event) => setValue(event.target.value)}
+        className="text-foreground placeholder:text-muted-foreground max-h-40 w-full cursor-text resize-none bg-transparent px-2 py-1.5 text-sm leading-5 outline-none select-text disabled:opacity-70"
+        disabled={disabled}
+        onChange={(event) => onTextChange(event.target.value)}
         onKeyDown={handleKeyDown}
         placeholder={t("chat.composer.placeholder")}
         ref={textareaRef}
         rows={1}
         value={value}
       />
+      {error !== null && (
+        <p className="text-destructive px-2 pb-0.5 text-xs" role="alert">
+          {t(`errors.${error.code}`)}
+        </p>
+      )}
       <div className="flex items-center gap-1 px-1">
         {/* Attachment is a provider-domain placeholder; the affordance lands
             now so the toolbar layout is final. */}
@@ -90,8 +115,8 @@ export function Composer({ onSend }: ComposerProps) {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              aria-label={t("chat.composer.send")}
-              disabled={!value.trim()}
+              aria-label={sendLabel}
+              disabled={disabled || value.trim().length === 0}
               onClick={handleSubmit}
               size="icon-sm"
               variant="default"
@@ -99,7 +124,7 @@ export function Composer({ onSend }: ComposerProps) {
               <ArrowUp />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{t("chat.composer.send")}</TooltipContent>
+          <TooltipContent>{sendLabel}</TooltipContent>
         </Tooltip>
       </div>
     </div>

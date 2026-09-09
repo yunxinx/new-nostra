@@ -16,8 +16,9 @@ import { Sidebar } from "@/features/sessions/components/Sidebar";
 import { SidebarToggleButton } from "@/features/sessions/components/SidebarToggleButton";
 import { useSessions } from "@/features/sessions/hooks/use-sessions";
 import { useSidebarPersistence } from "@/features/sessions/use-sidebar-persistence";
+import { useSendMessage } from "@/hooks/use-send-message";
 import { useShortcuts } from "@/hooks/use-shortcuts";
-import { useUiStore } from "@/stores/ui-store";
+import { draftKeyFor, useUiStore } from "@/stores/ui-store";
 
 export function App() {
   const { t } = useTranslation();
@@ -25,6 +26,9 @@ export function App() {
   useShortcuts();
   useSidebarPersistence();
   const { hasSessions } = useSessions();
+  // The send orchestration lives in App's stable lifetime so submissions
+  // survive message-list remounts across session and draft switches.
+  const { send } = useSendMessage();
   const activeSessionId = useUiStore((s) => s.activeSessionId);
   const draftId = useUiStore((s) => s.draftId);
   const startNewChat = useUiStore((s) => s.startNewChat);
@@ -42,6 +46,17 @@ export function App() {
       .then(() => void getCurrentWindow().setFocus());
   }, []);
 
+  function handleSend(text: string): void {
+    send(
+      {
+        draftId,
+        draftKey: activeSessionId ?? draftKeyFor(draftId),
+        sessionId: activeSessionId,
+      },
+      text,
+    );
+  }
+
   return (
     <div className="bg-background text-foreground flex h-screen overflow-hidden">
       <Sidebar />
@@ -53,18 +68,23 @@ export function App() {
           {/* Selection identity is activeSessionId alone: a session stays
               selected even when its sidebar page is evicted or the list
               fails. A null selection is the new-chat draft; the draft key
-              change discards the previous draft's component state. */}
-          {activeSessionId ? (
+              change discards the previous draft's component state, while the
+              message window and drafts have their own owners. */}
+          {activeSessionId !== null ? (
             <MessageList
+              composerKey={activeSessionId}
               hasSessions={hasSessions}
               key={activeSessionId}
-              messages={[]}
+              onSend={handleSend}
+              sessionId={activeSessionId}
             />
           ) : (
             <MessageList
+              composerKey={draftKeyFor(draftId)}
               hasSessions={hasSessions}
               key={`draft-${String(draftId)}`}
-              messages={[]}
+              onSend={handleSend}
+              sessionId={null}
             />
           )}
         </section>

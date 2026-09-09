@@ -62,6 +62,14 @@ export function useDeleteSession() {
   return useSessionMutation<DeleteSessionParams>({
     mutationFn: deleteSession,
     networkMode: "always",
+    onMutate: (variables) => {
+      // Send/delete mutual exclusion for the same session: the composer
+      // reads this flag and refuses to submit while deletion is in flight.
+      useUiStore.getState().beginDelete(variables.sessionId);
+    },
+    onSettled: (_result, _error, variables) => {
+      useUiStore.getState().endDelete(variables.sessionId);
+    },
     onSuccess: async (_result, variables) => {
       // Cancel before removing: a late read resolving for the deleted
       // session must not rebuild its messages cache.
@@ -71,9 +79,13 @@ export function useDeleteSession() {
       queryClient.removeQueries({
         queryKey: messagesKeys.bySession(variables.sessionId),
       });
+      // The draft and its submit error are owned by the deleted session.
+      useUiStore.getState().discardDraft(variables.sessionId);
       if (useUiStore.getState().activeSessionId === variables.sessionId) {
         useUiStore.getState().setActiveSession(null);
       }
+      // The delete already committed; a failed list read surfaces as the
+      // sidebar streams' error state, not as a failed delete.
       await queryClient.resetQueries({ queryKey: sessionsKeys.lists() });
     },
     retry: false,

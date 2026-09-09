@@ -1,5 +1,11 @@
+import { enableMapSet } from "immer";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
+
+import type { AppError } from "@/types/ipc";
+
+// Map/Set drafts need the immer plugin; the call is idempotent.
+enableMapSet();
 
 export type ThemeOverride = "dark" | "light" | "system";
 
@@ -8,8 +14,24 @@ const SIDEBAR_MIN_WIDTH = 220;
 
 interface UiState {
   activeSessionId: null | string;
+  /** Sessions with an in-flight delete; blocks sends for the same session. */
+  beginDelete: (sessionId: string) => void;
+  /** Draft locations with an in-flight submit; blocks resends and deletes. */
+  beginSubmit: (key: string) => void;
+  discardDraft: (key: string) => void;
+  /** Composer text keyed by draft location: a session id, or `draft:<n>`. */
+  draftErrors: Map<string, AppError>;
   draftId: number;
+  /** Last submit failure per draft location; cleared on the next attempt. */
+  drafts: Map<string, string>;
+  endDelete: (sessionId: string) => void;
+  endSubmit: (key: string) => void;
+  pendingDeletes: Set<string>;
+  pendingSubmits: Set<string>;
+  resolveSubmit: (key: string, submittedText: string) => void;
   setActiveSession: (id: null | string) => void;
+  setDraft: (key: string, text: string) => void;
+  setDraftError: (key: string, error: AppError | null) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setSidebarWidth: (width: number) => void;
   setThemeOverride: (override: ThemeOverride) => void;
@@ -20,13 +42,66 @@ interface UiState {
   toggleSidebarCollapsed: () => void;
 }
 
+/** Draft location for the anonymous new-chat target: `draft:<draftId>`. */
+export function draftKeyFor(draftId: number): string {
+  return `draft:${String(draftId)}`;
+}
+
 export const useUiStore = create<UiState>()(
   immer((set) => ({
     activeSessionId: null,
+    beginDelete: (sessionId) =>
+      set((state) => {
+        state.pendingDeletes.add(sessionId);
+      }),
+    beginSubmit: (key) =>
+      set((state) => {
+        state.pendingSubmits.add(key);
+      }),
+    discardDraft: (key) =>
+      set((state) => {
+        state.drafts.delete(key);
+        state.draftErrors.delete(key);
+      }),
+    draftErrors: new Map(),
     draftId: 0,
+    drafts: new Map(),
+    endDelete: (sessionId) =>
+      set((state) => {
+        state.pendingDeletes.delete(sessionId);
+      }),
+    endSubmit: (key) =>
+      set((state) => {
+        state.pendingSubmits.delete(key);
+      }),
+    pendingDeletes: new Set(),
+    pendingSubmits: new Set(),
+    resolveSubmit: (key, submittedText) =>
+      set((state) => {
+        state.draftErrors.delete(key);
+        // Only the submitted version is cleared; text typed after submitting
+        // in another context survives untouched. The composer submits the
+        // trimmed form, so leading/trailing whitespace does not distinguish
+        // versions.
+        if (state.drafts.get(key)?.trim() === submittedText) {
+          state.drafts.delete(key);
+        }
+      }),
     setActiveSession: (activeSessionId) =>
       set((state) => {
         state.activeSessionId = activeSessionId;
+      }),
+    setDraft: (key, text) =>
+      set((state) => {
+        state.drafts.set(key, text);
+      }),
+    setDraftError: (key, error) =>
+      set((state) => {
+        if (error === null) {
+          state.draftErrors.delete(key);
+        } else {
+          state.draftErrors.set(key, error);
+        }
       }),
     setSidebarCollapsed: (sidebarCollapsed) =>
       set((state) => {
@@ -49,6 +124,11 @@ export const useUiStore = create<UiState>()(
     sidebarWidth: 272,
     startNewChat: () =>
       set((state) => {
+        // Starting the next draft revokes the previous anonymous draft and
+        // its error; a submit still in flight must not resurrect either.
+        const key = draftKeyFor(state.draftId);
+        state.drafts.delete(key);
+        state.draftErrors.delete(key);
         state.activeSessionId = null;
         state.draftId += 1;
       }),
