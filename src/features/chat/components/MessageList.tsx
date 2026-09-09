@@ -288,11 +288,11 @@ function ChatPane({ composerKey, onSend, path, sessionId }: ChatPaneProps) {
           {t("chat.jumpToLatest")}
         </Button>
       )}
-      <div
-        className="absolute inset-x-0 bottom-0 px-6 pt-2 pb-3"
-        ref={composerRef}
-      >
-        <div className="mx-auto w-full max-w-[760px]">
+      <div className="absolute inset-x-0 bottom-0 pt-2 pb-3" ref={composerRef}>
+        {/* Mirrors the message column (max-w + px-6) so the composer's right
+            border meets the user bubble's right edge — both content boxes
+            share the same horizontal bounds. */}
+        <div className="mx-auto w-full max-w-[760px] px-6">
           <Composer
             disabled={isSubmitPending || isDeletePending}
             error={submitError}
