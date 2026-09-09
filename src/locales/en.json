@@ -5,7 +5,6 @@
     "expandSidebar": "Expand sidebar"
   },
   "common": {
-    "save": "Save",
     "cancel": "Cancel",
     "retry": "Retry"
   },
@@ -16,7 +15,6 @@
     "unfavorite": "Unfavorite",
     "empty": "No conversations yet",
     "loadMore": "Load more",
-    "rename": "Rename",
     "title": "Title",
     "groups": {
       "favorites": "Favorites",
@@ -44,8 +42,6 @@
     "copyMessage": "Copy message",
     "jumpToLatest": "Jump to latest",
     "empty": {
-      "noSessionsTitle": "No conversation open",
-      "noSessionsHint": "Click \"New chat\" to start a conversation.",
       "newChatTitle": "How can I help you today?",
       "newChatHint": "Ask me anything. Enter to send, Shift+Enter for newline."
     }

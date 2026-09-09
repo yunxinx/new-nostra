@@ -18,6 +18,7 @@ interface UiState {
   beginDelete: (sessionId: string) => void;
   /** Draft locations with an in-flight submit; blocks resends and deletes. */
   beginSubmit: (key: string) => void;
+  clearEnteringSession: () => void;
   discardDraft: (key: string) => void;
   /** Composer text keyed by draft location: a session id, or `draft:<n>`. */
   draftErrors: Map<string, AppError>;
@@ -26,12 +27,15 @@ interface UiState {
   drafts: Map<string, string>;
   endDelete: (sessionId: string) => void;
   endSubmit: (key: string) => void;
+  /** Session id whose sidebar row is playing its enter animation. */
+  enteringSessionId: null | string;
   pendingDeletes: Set<string>;
   pendingSubmits: Set<string>;
   resolveSubmit: (key: string, submittedText: string) => void;
   setActiveSession: (id: null | string) => void;
   setDraft: (key: string, text: string) => void;
   setDraftError: (key: string, error: AppError | null) => void;
+  setEnteringSession: (id: string) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setSidebarWidth: (width: number) => void;
   setThemeOverride: (override: ThemeOverride) => void;
@@ -58,6 +62,10 @@ export const useUiStore = create<UiState>()(
       set((state) => {
         state.pendingSubmits.add(key);
       }),
+    clearEnteringSession: () =>
+      set((state) => {
+        state.enteringSessionId = null;
+      }),
     discardDraft: (key) =>
       set((state) => {
         state.drafts.delete(key);
@@ -74,6 +82,7 @@ export const useUiStore = create<UiState>()(
       set((state) => {
         state.pendingSubmits.delete(key);
       }),
+    enteringSessionId: null,
     pendingDeletes: new Set(),
     pendingSubmits: new Set(),
     resolveSubmit: (key, submittedText) =>
@@ -102,6 +111,10 @@ export const useUiStore = create<UiState>()(
         } else {
           state.draftErrors.set(key, error);
         }
+      }),
+    setEnteringSession: (enteringSessionId) =>
+      set((state) => {
+        state.enteringSessionId = enteringSessionId;
       }),
     setSidebarCollapsed: (sidebarCollapsed) =>
       set((state) => {

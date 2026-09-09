@@ -1,6 +1,7 @@
 import {
   type InfiniteData,
   infiniteQueryOptions,
+  type QueryClient,
   useInfiniteQuery,
   type UseInfiniteQueryResult,
   useMutation,
@@ -10,12 +11,7 @@ import {
 } from "@tanstack/react-query";
 import { useRef } from "react";
 
-import type {
-  AppError,
-  Session,
-  SessionCursor,
-  SessionPage,
-} from "@/types/ipc";
+import type { AppError, Session, SessionPage } from "@/types/ipc";
 
 import {
   deleteSession,
@@ -27,7 +23,20 @@ import {
   type SetSessionPinnedParams,
 } from "@/lib/ipc/sessions";
 import { messagesKeys, sessionsKeys } from "@/lib/query-keys";
+import {
+  removeSessionFromList,
+  type SessionListData,
+  type SessionPageParam,
+} from "@/lib/session-list-cache";
 import { useUiStore } from "@/stores/ui-store";
+
+/**
+ * Duration of a sidebar row's enter/exit animations (session-row-enter /
+ * session-row-exit in index.css). The delete keeps the row in the list
+ * caches for this long after the confirm so the collapse finishes before
+ * the row unmounts; the enter marker clears on the same window.
+ */
+export const SESSION_ROW_ANIMATION_MS = 200;
 
 export interface SessionsResult {
   // True while either stream has rows, is still on its first load, or failed;
@@ -36,6 +45,10 @@ export interface SessionsResult {
   loadMore: (pinned: boolean) => void;
   pinned: SessionListStream;
   standard: SessionListStream;
+}
+
+interface DeleteContext {
+  deleteStartedAt: number;
 }
 
 type SessionListQuery = UseInfiniteQueryResult<
@@ -55,22 +68,23 @@ interface SessionListStream {
   sessions: Session[];
 }
 
-type SessionPageParam = null | SessionCursor;
-
 export function useDeleteSession() {
   const queryClient = useQueryClient();
-  return useSessionMutation<DeleteSessionParams>({
+  return useSessionMutation<DeleteSessionParams, DeleteContext>({
     mutationFn: deleteSession,
     networkMode: "always",
     onMutate: (variables) => {
       // Send/delete mutual exclusion for the same session: the composer
       // reads this flag and refuses to submit while deletion is in flight.
       useUiStore.getState().beginDelete(variables.sessionId);
+      // The row's exit animation starts at the confirm click; the context
+      // anchors the data-layer removal to the same moment.
+      return { deleteStartedAt: Date.now() };
     },
     onSettled: (_result, _error, variables) => {
       useUiStore.getState().endDelete(variables.sessionId);
     },
-    onSuccess: async (_result, variables) => {
+    onSuccess: async (_result, variables, context) => {
       // Cancel before removing: a late read resolving for the deleted
       // session must not rebuild its messages cache.
       await queryClient.cancelQueries({
@@ -84,9 +98,14 @@ export function useDeleteSession() {
       if (useUiStore.getState().activeSessionId === variables.sessionId) {
         useUiStore.getState().setActiveSession(null);
       }
+      // The visual layer owns the timing: the row collapses from the confirm
+      // click, and the cache removal lands only after the animation window
+      // closes. A failed delete never reaches this point, so the row
+      // recovers with nothing to undo here.
+      await exitDelay(context.deleteStartedAt);
+      removeSessionRow(queryClient, variables.sessionId);
       // The delete already committed; a failed list read surfaces as the
       // sidebar streams' error state, not as a failed delete.
-      await queryClient.resetQueries({ queryKey: sessionsKeys.lists() });
     },
     retry: false,
   });
@@ -160,6 +179,31 @@ export function useSetSessionPinned() {
   });
 }
 
+// A delete commits instantly while the row still animates; only the leftover
+// animation window is waited out, so a slow IPC eats into it.
+function exitDelay(startedAt: number): Promise<void> {
+  const remaining = SESSION_ROW_ANIMATION_MS - (Date.now() - startedAt);
+  if (remaining <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    setTimeout(resolve, remaining);
+  });
+}
+
+function removeSessionRow(queryClient: QueryClient, sessionId: string): void {
+  for (const pinned of [false, true]) {
+    const key = sessionsKeys.list(pinned);
+    const next = removeSessionFromList(
+      queryClient.getQueryData<SessionListData>(key),
+      sessionId,
+    );
+    if (next !== null) {
+      queryClient.setQueryData(key, next);
+    }
+  }
+}
+
 function sessionListOptions(pinned: boolean) {
   return infiniteQueryOptions<
     SessionPage,
@@ -196,8 +240,8 @@ function toStream(query: SessionListQuery): SessionListStream {
 // Session mutations succeed with no data and reject with the serialized
 // AppError. Call-site type arguments cannot carry a bare void (lint
 // no-invalid-void-type), so the options type anchors the generics here.
-function useSessionMutation<TVariables>(
-  options: UseMutationOptions<void, AppError, TVariables>,
-): UseMutationResult<void, AppError, TVariables> {
+function useSessionMutation<TVariables, TContext = unknown>(
+  options: UseMutationOptions<void, AppError, TVariables, TContext>,
+): UseMutationResult<void, AppError, TVariables, TContext> {
   return useMutation(options);
 }

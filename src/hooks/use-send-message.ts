@@ -16,6 +16,11 @@ import {
   type MessageWindow,
 } from "@/lib/message-window";
 import { messagesKeys, sessionsKeys } from "@/lib/query-keys";
+import {
+  moveSessionToHead,
+  prependSessionToFirstPage,
+  type SessionListData,
+} from "@/lib/session-list-cache";
 import { useUiStore } from "@/stores/ui-store";
 
 const TITLE_MAX_CODE_POINTS = 50;
@@ -90,10 +95,13 @@ export function useSendMessage(): SendMessageResult {
       // send: the kernel's reset/refetch aggregation swallows fetch errors.
       if (result.kind === "append") {
         await landAppend(result.entry, variables);
+        await reflectAppendInLists(
+          variables.target.sessionId,
+          result.entry.createdAt,
+        );
       } else {
         landCreate(result.created, variables);
       }
-      await queryClient.resetQueries({ queryKey: sessionsKeys.lists() });
       useUiStore
         .getState()
         .resolveSubmit(variables.target.draftKey, variables.text);
@@ -130,6 +138,19 @@ export function useSendMessage(): SendMessageResult {
   function landCreate(created: CreatedSession, variables: SendVariables): void {
     const key = messagesKeys.bySession(created.session.id);
     queryClient.setQueryData(key, createTailWindow(created.entry));
+    // The sidebar keeps its loaded page structure: the new session joins the
+    // standard list's first page at the head (its updatedAt is the newest);
+    // a list the UI has not loaded yet reads it on its next mount. The new
+    // row announces itself with the enter animation.
+    const listKey = sessionsKeys.list(false);
+    const prepended = prependSessionToFirstPage(
+      queryClient.getQueryData<SessionListData>(listKey),
+      created.session,
+    );
+    if (prepended !== null) {
+      queryClient.setQueryData(listKey, prepended);
+    }
+    useUiStore.getState().setEnteringSession(created.session.id);
     const store = useUiStore.getState();
     // The new session takes over the view only while the user still sits on
     // the same draft; otherwise it just appears in the sidebar and the
@@ -139,6 +160,35 @@ export function useSendMessage(): SendMessageResult {
       store.draftId === variables.target.draftId
     ) {
       store.setActiveSession(created.session.id);
+    }
+  }
+
+  // Reflects the append's activity bump in the sidebar: the row moves to the
+  // head of whichever loaded list holds it. A row outside the loaded pages
+  // cannot be positioned without inventing data, so the lists fall back to
+  // invalidation and the active observers refetch with their stored pages.
+  async function reflectAppendInLists(
+    sessionId: null | string,
+    updatedAt: string,
+  ): Promise<void> {
+    if (sessionId === null) {
+      return;
+    }
+    let moved = false;
+    for (const pinned of [false, true]) {
+      const key = sessionsKeys.list(pinned);
+      const next = moveSessionToHead(
+        queryClient.getQueryData<SessionListData>(key),
+        sessionId,
+        updatedAt,
+      );
+      if (next !== null) {
+        queryClient.setQueryData(key, next);
+        moved = true;
+      }
+    }
+    if (!moved) {
+      await queryClient.invalidateQueries({ queryKey: sessionsKeys.lists() });
     }
   }
 

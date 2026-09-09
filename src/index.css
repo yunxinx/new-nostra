@@ -213,6 +213,54 @@
   );
 }
 
+/* Row enter/exit animations. The 200ms here matches SESSION_ROW_ANIMATION_MS
+   in features/sessions/hooks/use-sessions.ts, which holds the deleted row in
+   the list caches until the exit finishes. The negative final
+   margin-bottom cancels the list's 4px row gap so the neighbors' slide
+   matches the height collapse and nothing snaps when the row unmounts.
+   The enter pair animates from the same collapsed state, so an inserted
+   row expands into place. The exit keeps pointer events off: a row being
+   deleted must not be operable again while it animates. */
+@keyframes session-row-enter {
+  from {
+    height: 0;
+    margin-bottom: -4px;
+    opacity: 0;
+  }
+  to {
+    height: 32px;
+    margin-bottom: 0;
+    opacity: 1;
+  }
+}
+@keyframes session-row-exit {
+  from {
+    height: 32px;
+    margin-bottom: 0;
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    margin-bottom: -4px;
+    opacity: 0;
+  }
+}
+.session-row-enter {
+  animation: session-row-enter 200ms ease-out;
+  overflow: hidden;
+}
+.session-row-exit {
+  animation: session-row-exit 200ms ease-in forwards;
+  overflow: hidden;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-row-enter,
+  .session-row-exit {
+    animation: none;
+  }
+}
+
 /* Assistant prose: 14px base with a 1.5/1.3/1.15 heading scale and a tight
    4px block rhythm, overriding markstream's document-oriented defaults
    (16px base, 2.25rem h1, 1.25em paragraph margins).

@@ -67,7 +67,10 @@ pub async fn append_message(
     params: AppendMessageParams,
 ) -> Result<EntryDto, AppError> {
     let conn = state.db.lock().await;
-    Ok(entries::append(&conn, &params.session_id, &params.content)?.into())
+    super::log_command_failures(
+        "append_message",
+        entries::append(&conn, &params.session_id, &params.content).map(Into::into),
+    )
 }
 
 #[tauri::command]
@@ -76,7 +79,10 @@ pub async fn load_active_path(
     params: LoadActivePathParams,
 ) -> Result<PathPageDto, AppError> {
     let conn = state.db.lock().await;
-    Ok(entries::load_active_path(&conn, &params.session_id, params.limit)?.into())
+    super::log_command_failures(
+        "load_active_path",
+        entries::load_active_path(&conn, &params.session_id, params.limit).map(Into::into),
+    )
 }
 
 #[tauri::command]
@@ -85,8 +91,11 @@ pub async fn load_active_path_before(
     params: LoadActivePathCursorParams,
 ) -> Result<PathPageDto, AppError> {
     let conn = state.db.lock().await;
-    Ok(entries::load_active_path_before(&conn, &params.session_id, &params.cursor, params.limit)?
-        .into())
+    super::log_command_failures(
+        "load_active_path_before",
+        entries::load_active_path_before(&conn, &params.session_id, &params.cursor, params.limit)
+            .map(Into::into),
+    )
 }
 
 #[tauri::command]
@@ -95,8 +104,11 @@ pub async fn load_active_path_after(
     params: LoadActivePathCursorParams,
 ) -> Result<PathPageDto, AppError> {
     let conn = state.db.lock().await;
-    Ok(entries::load_active_path_after(&conn, &params.session_id, &params.cursor, params.limit)?
-        .into())
+    super::log_command_failures(
+        "load_active_path_after",
+        entries::load_active_path_after(&conn, &params.session_id, &params.cursor, params.limit)
+            .map(Into::into),
+    )
 }
 
 #[tauri::command]
@@ -105,7 +117,10 @@ pub async fn delete_entry(
     params: DeleteEntryParams,
 ) -> Result<(), AppError> {
     let conn = state.db.lock().await;
-    entries::delete_entry(&conn, &params.session_id, &params.entry_id)
+    super::log_command_failures(
+        "delete_entry",
+        entries::delete_entry(&conn, &params.session_id, &params.entry_id),
+    )
 }
 
 #[tauri::command]
@@ -114,7 +129,10 @@ pub async fn set_active_leaf(
     params: SetActiveLeafParams,
 ) -> Result<(), AppError> {
     let conn = state.db.lock().await;
-    entries::set_active_leaf(&conn, &params.session_id, &params.entry_id)
+    super::log_command_failures(
+        "set_active_leaf",
+        entries::set_active_leaf(&conn, &params.session_id, &params.entry_id),
+    )
 }
 
 #[cfg(test)]

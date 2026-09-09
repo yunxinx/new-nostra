@@ -135,7 +135,6 @@ function renderMessageList(sessionId: null | string) {
       <TooltipProvider>
         <MessageList
           composerKey={sessionId ?? "draft:1"}
-          hasSessions
           onSend={() => undefined}
           sessionId={sessionId}
         />

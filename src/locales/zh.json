@@ -5,7 +5,6 @@
     "expandSidebar": "展开侧栏"
   },
   "common": {
-    "save": "保存",
     "cancel": "取消",
     "retry": "重试"
   },
@@ -16,7 +15,6 @@
     "unfavorite": "取消收藏",
     "empty": "还没有会话",
     "loadMore": "加载更多",
-    "rename": "重命名",
     "title": "标题",
     "groups": {
       "favorites": "收藏",
@@ -44,8 +42,6 @@
     "copyMessage": "复制消息",
     "jumpToLatest": "跳到最新",
     "empty": {
-      "noSessionsTitle": "没有打开的会话",
-      "noSessionsHint": "点击“新建会话”开始对话。",
       "newChatTitle": "今天我能帮你做点什么？",
       "newChatHint": "随便问点什么。Enter 发送，Shift+Enter 换行。"
     }

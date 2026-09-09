@@ -144,7 +144,10 @@ pub async fn list_sessions(
 ) -> Result<SessionPageDto, AppError> {
     let cursor = params.cursor.map(|c| SessionCursor { updated_at: c.updated_at, id: c.id });
     let conn = state.db.lock().await;
-    Ok(sessions::list(&conn, params.pinned, cursor.as_ref(), params.limit)?.into())
+    super::log_command_failures(
+        "list_sessions",
+        sessions::list(&conn, params.pinned, cursor.as_ref(), params.limit).map(Into::into),
+    )
 }
 
 #[tauri::command]
@@ -153,7 +156,10 @@ pub async fn create_session(
     params: CreateSessionParams,
 ) -> Result<CreatedSessionDto, AppError> {
     let conn = state.db.lock().await;
-    Ok(sessions::create(&conn, &params.title, &params.content)?.into())
+    super::log_command_failures(
+        "create_session",
+        sessions::create(&conn, &params.title, &params.content).map(Into::into),
+    )
 }
 
 #[tauri::command]
@@ -162,7 +168,10 @@ pub async fn rename_session(
     params: RenameSessionParams,
 ) -> Result<(), AppError> {
     let conn = state.db.lock().await;
-    sessions::rename(&conn, &params.session_id, &params.title)
+    super::log_command_failures(
+        "rename_session",
+        sessions::rename(&conn, &params.session_id, &params.title),
+    )
 }
 
 #[tauri::command]
@@ -171,7 +180,10 @@ pub async fn set_session_pinned(
     params: SetSessionPinnedParams,
 ) -> Result<(), AppError> {
     let conn = state.db.lock().await;
-    sessions::set_pinned(&conn, &params.session_id, params.pinned)
+    super::log_command_failures(
+        "set_session_pinned",
+        sessions::set_pinned(&conn, &params.session_id, params.pinned),
+    )
 }
 
 #[tauri::command]
@@ -180,7 +192,7 @@ pub async fn delete_session(
     params: DeleteSessionParams,
 ) -> Result<(), AppError> {
     let conn = state.db.lock().await;
-    sessions::delete(&conn, &params.session_id)
+    super::log_command_failures("delete_session", sessions::delete(&conn, &params.session_id))
 }
 
 #[cfg(test)]

@@ -7,7 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppError, Session, SessionPage } from "@/types/ipc";
 
@@ -16,6 +16,7 @@ import { messagesKeys, sessionsKeys } from "@/lib/query-keys";
 import { useUiStore } from "@/stores/ui-store";
 
 import {
+  SESSION_ROW_ANIMATION_MS,
   useDeleteSession,
   useRenameSession,
   useSessions,
@@ -347,7 +348,7 @@ describe("session mutations", () => {
     expect(pinnedIds).toContain("n19");
   });
 
-  it("resets both streams and clears the selection after deleting the active session", async () => {
+  it("removes the deleted row from the loaded pages and clears the selection", async () => {
     const sessionsResult = await renderUseSessions();
     useUiStore.setState({ activeSessionId: "n19" });
     queryClient.setQueryData(messagesKeys.bySession("n19"), {
@@ -361,15 +362,86 @@ describe("session mutations", () => {
     removeResult.current.mutate({ sessionId: "n19" });
     await waitFor(() => expect(removeResult.current.isSuccess).toBe(true));
 
+    // The row leaves the cache only after the exit animation window closes;
+    // the loaded page keeps its shape and boundary cursor.
     await waitFor(() => {
       expect(sessionsResult.current.standard.sessions.map((s) => s.id)).toEqual(
-        ["n18", "n17", "n16", "n15"],
+        ["n18", "n17", "n16"],
       );
     });
+    expect(standardListData()?.pages).toHaveLength(1);
+    expect(standardListData()?.pageParams).toHaveLength(1);
     expect(useUiStore.getState().activeSessionId).toBeNull();
     expect(
       queryClient.getQueryData(messagesKeys.bySession("n19")),
     ).toBeUndefined();
+  });
+
+  it("holds the row in the caches for the exit window, then removes it from both loaded lists", async () => {
+    vi.useFakeTimers();
+    try {
+      const before = ["n19", "n18", "n17", "n16"];
+      queryClient.setQueryData(sessionsKeys.list(false), {
+        pageParams: [null],
+        pages: [
+          {
+            nextCursor: {
+              id: "n15",
+              updatedAt: SAME_TIMESTAMP,
+            },
+            sessions: sessions
+              .filter((s) => !s.pinned)
+              .sort((a, b) => compareKeyset(b, a))
+              .slice(0, before.length),
+          },
+        ],
+      });
+      queryClient.setQueryData(sessionsKeys.list(true), {
+        pageParams: [null],
+        pages: [
+          {
+            nextCursor: null,
+            sessions: sessions
+              .filter((s) => s.pinned)
+              .sort((a, b) => compareKeyset(b, a))
+              .slice(0, 4),
+          },
+        ],
+      });
+
+      const { result } = renderHook(() => useDeleteSession(), {
+        wrapper: Wrapper,
+      });
+      result.current.mutate({ sessionId: "p19" });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      // The delete committed; the pinned row stays mounted while the exit
+      // animation window runs.
+      expect(
+        queryClient
+          .getQueryData<InfiniteData<SessionPage>>(sessionsKeys.list(true))
+          ?.pages[0]?.sessions.map((s) => s.id),
+      ).toContain("p19");
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SESSION_ROW_ANIMATION_MS);
+      });
+      expect(result.current.isSuccess).toBe(true);
+      expect(
+        queryClient
+          .getQueryData<InfiniteData<SessionPage>>(sessionsKeys.list(true))
+          ?.pages[0]?.sessions.map((s) => s.id),
+      ).toEqual(["p18", "p17", "p16"]);
+      // The standard list was not holding the row; its cache is untouched.
+      expect(
+        queryClient
+          .getQueryData<InfiniteData<SessionPage>>(sessionsKeys.list(false))
+          ?.pages[0]?.sessions.map((s) => s.id),
+      ).toEqual(before);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps the selection when a non-active session is deleted", async () => {

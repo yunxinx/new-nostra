@@ -55,9 +55,6 @@ interface MessageListProps {
   // Draft location owning the composer text: the session id, or
   // `draft:<draftId>` while the conversation is still unsent.
   composerKey: string;
-  // With no messages to render, the empty state distinguishes an empty
-  // sidebar (no sessions) from a new-chat draft.
-  hasSessions: boolean;
   onSend: (text: string) => void;
   sessionId: null | string;
 }
@@ -69,22 +66,19 @@ interface MessageRowProps {
 
 export function MessageList({
   composerKey,
-  hasSessions,
   onSend,
   sessionId,
 }: MessageListProps) {
   return sessionId === null ? (
     <ChatPane
       composerKey={composerKey}
-      hasSessions={hasSessions}
       onSend={onSend}
       path={DRAFT_PATH}
-      sessionId={sessionId}
+      sessionId={null}
     />
   ) : (
     <SessionChatPane
       composerKey={composerKey}
-      hasSessions={hasSessions}
       onSend={onSend}
       sessionId={sessionId}
     />
@@ -110,13 +104,7 @@ function captureAnchor(
   }
 }
 
-function ChatPane({
-  composerKey,
-  hasSessions,
-  onSend,
-  path,
-  sessionId,
-}: ChatPaneProps) {
+function ChatPane({ composerKey, onSend, path, sessionId }: ChatPaneProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -267,9 +255,11 @@ function ChatPane({
               />
             ))}
           </div>
-        ) : path.error !== null ? null : ( // banner below carries the retry. // A failed read must not read as an empty conversation; the error
+        ) : path.error !== null ? null : (
+          // A failed read must not read as an empty conversation; the error
+          // banner below carries the retry.
           <div className="flex h-full items-center justify-center">
-            <EmptyState variant={hasSessions ? "newChat" : "noSessions"} />
+            <EmptyState />
           </div>
         )}
       </div>

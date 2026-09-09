@@ -14,7 +14,6 @@ import { useTheme } from "@/features/appearance/use-theme";
 import { MessageList } from "@/features/chat/components/MessageList";
 import { Sidebar } from "@/features/sessions/components/Sidebar";
 import { SidebarToggleButton } from "@/features/sessions/components/SidebarToggleButton";
-import { useSessions } from "@/features/sessions/hooks/use-sessions";
 import { useSidebarPersistence } from "@/features/sessions/use-sidebar-persistence";
 import { useSendMessage } from "@/hooks/use-send-message";
 import { useShortcuts } from "@/hooks/use-shortcuts";
@@ -25,7 +24,6 @@ export function App() {
   useTheme();
   useShortcuts();
   useSidebarPersistence();
-  const { hasSessions } = useSessions();
   // The send orchestration lives in App's stable lifetime so submissions
   // survive message-list remounts across session and draft switches.
   const { send } = useSendMessage();
@@ -73,7 +71,6 @@ export function App() {
           {activeSessionId !== null ? (
             <MessageList
               composerKey={activeSessionId}
-              hasSessions={hasSessions}
               key={activeSessionId}
               onSend={handleSend}
               sessionId={activeSessionId}
@@ -81,8 +78,7 @@ export function App() {
           ) : (
             <MessageList
               composerKey={draftKeyFor(draftId)}
-              hasSessions={hasSessions}
-              key={`draft-${String(draftId)}`}
+              key={draftKeyFor(draftId)}
               onSend={handleSend}
               sessionId={null}
             />

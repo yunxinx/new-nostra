@@ -21,6 +21,7 @@ import type {
 import { useActivePath } from "@/features/chat/hooks/use-active-path";
 import { type MessageWindow } from "@/lib/message-window";
 import { messagesKeys, sessionsKeys } from "@/lib/query-keys";
+import { type SessionListData } from "@/lib/session-list-cache";
 import { draftKeyFor, useUiStore } from "@/stores/ui-store";
 
 import { type SendTarget, useSendMessage } from "./use-send-message";
@@ -302,9 +303,61 @@ describe("useSendMessage first send", () => {
     ]);
     expect(window?.pages[0]?.nextCursor).toBeNull();
     expect(window?.pageParams).toEqual([{ kind: "tail" }]);
-    // Both sidebar streams restarted from their first page.
-    expect(queryClient.getQueryData(sessionsKeys.list(false))).toBeUndefined();
-    expect(queryClient.getQueryData(sessionsKeys.list(true))).toBeUndefined();
+    // The sidebar keeps its loaded page structure: the new session joins the
+    // standard list's first page at the head, and the new row is marked for
+    // its enter animation.
+    const standardList = queryClient.getQueryData<SessionListData>(
+      sessionsKeys.list(false),
+    );
+    expect(standardList?.pages[0]?.sessions.map((s) => s.id)).toEqual([
+      "s-new-1",
+    ]);
+    expect(standardList?.pageParams).toEqual([null]);
+    expect(
+      queryClient.getQueryData<SessionListData>(sessionsKeys.list(true))
+        ?.pages[0]?.sessions,
+    ).toEqual([]);
+    expect(useUiStore.getState().enteringSessionId).toBe("s-new-1");
+  });
+
+  it("commits only once when double Enter straddles the guard flip", async () => {
+    useUiStore.setState({
+      activeSessionId: null,
+      draftId: 1,
+      drafts: new Map([[draftKeyFor(1), "double enter"]]),
+    });
+    // The create stays in flight so the pending window is observable.
+    deferNextCreate = true;
+    const { result } = renderSendHarness(null);
+
+    await act(async () => {
+      // The first Enter flips pendingSubmits synchronously inside send();
+      // the second Enter lands before onMutate (one microtask later) and must
+      // be a no-op.
+      result.current.send(draftTarget(), "double enter");
+      result.current.send(draftTarget(), "double enter");
+      await Promise.resolve();
+      // A third Enter while the IPC is still pending hits the same guard.
+      result.current.send(draftTarget(), "double enter");
+    });
+    expect(createParams).toHaveLength(1);
+    expect(useUiStore.getState().pendingSubmits.has(draftKeyFor(1))).toBe(true);
+
+    resolveCreate?.({
+      entry: entry("first-1", null, "double enter"),
+      session: {
+        createdAt: NOW,
+        id: "s-new-1",
+        pinned: false,
+        title: "double enter",
+        updatedAt: NOW,
+      },
+    });
+    await waitFor(() => {
+      expect(useUiStore.getState().activeSessionId).toBe("s-new-1");
+    });
+    expect(createParams).toHaveLength(1);
+    expect(useUiStore.getState().drafts.get(draftKeyFor(1))).toBeUndefined();
   });
 
   it("derives the title from collapsed whitespace, capped at 50 code points", async () => {
@@ -402,6 +455,9 @@ describe("useSendMessage first send", () => {
     expect(
       queryClient.getQueryData(messagesKeys.bySession("s-new-1")),
     ).toBeDefined();
+    // An unloaded list is never fabricated on the late result's behalf.
+    expect(queryClient.getQueryData(sessionsKeys.list(false))).toBeUndefined();
+    expect(useUiStore.getState().enteringSessionId).toBe("s-new-1");
   });
 
   it("submits offline (networkMode always)", async () => {
@@ -426,6 +482,33 @@ describe("useSendMessage append", () => {
   it("merges the appended entry into the intact tail window", async () => {
     seedTailWindow("s1", 30);
     seedListCaches();
+    // The standard list has s1 loaded on a page that another session heads;
+    // the append moves s1 to the head with the write's timestamp as its
+    // new updatedAt.
+    queryClient.setQueryData<SessionListData>(sessionsKeys.list(false), {
+      pageParams: [null],
+      pages: [
+        {
+          nextCursor: null,
+          sessions: [
+            {
+              createdAt: NOW,
+              id: "s-other",
+              pinned: false,
+              title: "Other",
+              updatedAt: NOW,
+            },
+            {
+              createdAt: "2000-01-01T00:00:00.000Z",
+              id: "s1",
+              pinned: false,
+              title: "Target",
+              updatedAt: "2000-01-01T00:00:00.000Z",
+            },
+          ],
+        },
+      ],
+    });
     useUiStore.setState({
       activeSessionId: "s1",
       draftId: 1,
@@ -451,7 +534,44 @@ describe("useSendMessage append", () => {
     expect(window?.pages[0]?.nextCursor).toBeNull();
     expect(window?.pageParams).toEqual([{ kind: "tail" }]);
     expect(useUiStore.getState().drafts.get("s1")).toBeUndefined();
-    expect(queryClient.getQueryData(sessionsKeys.list(false))).toBeUndefined();
+    const standardList = queryClient.getQueryData<SessionListData>(
+      sessionsKeys.list(false),
+    );
+    expect(standardList?.pages[0]?.sessions.map((s) => s.id)).toEqual([
+      "s1",
+      "s-other",
+    ]);
+    expect(standardList?.pages[0]?.sessions[0]?.updatedAt).toBe(NOW);
+    expect(standardList?.pageParams).toEqual([null]);
+  });
+
+  it("leaves the loaded lists alone when the appended row is not on them", async () => {
+    seedTailWindow("s1", 30);
+    seedListCaches();
+    useUiStore.setState({
+      activeSessionId: "s1",
+      draftId: 1,
+      drafts: new Map([["s1", "from a long list"]]),
+    });
+    appendParentId = "e29";
+    const { result } = renderSendHarness("s1");
+
+    await act(async () => {
+      result.current.send(sessionTarget("s1"), "from a long list");
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(result.current.path?.messages.at(-1)?.id).toBe("appended-1");
+    });
+    // No page holds s1, so no position is fabricated: the lists are marked
+    // stale for the active observers instead.
+    const standardList = queryClient.getQueryData<SessionListData>(
+      sessionsKeys.list(false),
+    );
+    expect(standardList?.pages[0]?.sessions).toEqual([]);
+    expect(
+      queryClient.getQueryState(sessionsKeys.list(false))?.isInvalidated,
+    ).toBe(true);
   });
 
   it("resets the window to the fresh tail after sending from a history window", async () => {

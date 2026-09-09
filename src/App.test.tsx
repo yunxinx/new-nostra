@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import {
   afterEach,
@@ -45,6 +46,7 @@ let sessionEntries: Entry[];
 let createCalls: number;
 let appendCalls: number;
 let loadPathCalls: number;
+let baseIpcHandler: (command: string, payload: unknown) => unknown;
 
 function renderApp(): void {
   render(
@@ -78,7 +80,7 @@ beforeEach(() => {
   appendCalls = 0;
   loadPathCalls = 0;
   mockWindows("main");
-  mockIPC((command, payload) => {
+  baseIpcHandler = (command: string, payload: unknown): unknown => {
     if (
       command === "plugin:window|show" ||
       command === "plugin:window|set_focus"
@@ -146,7 +148,8 @@ beforeEach(() => {
       default:
         throw new Error(`Unexpected IPC command: ${command}`);
     }
-  });
+  };
+  mockIPC((command, payload) => baseIpcHandler(command, payload));
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -227,11 +230,84 @@ describe("new chat", () => {
 });
 
 describe("empty library", () => {
-  it("shows the no-sessions empty state once both list streams settle empty", async () => {
+  it("keeps the new-chat empty state once both list streams settle empty", async () => {
     renderApp();
-    // A loading list must never read as an empty library, so the new-chat
-    // state shows until the empty pages actually arrive.
+    // A loading list must never read as an empty library; the same
+    // new-chat state remains after the empty pages actually arrive.
     expect(screen.getByText("How can I help you today?")).toBeTruthy();
-    expect(await screen.findByText("No conversation open")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText("No conversations yet")).toBeTruthy();
+    });
+    expect(screen.getByText("How can I help you today?")).toBeTruthy();
+  });
+});
+
+describe("deleting sessions", () => {
+  it("keeps the open session and its messages when another session is deleted", async () => {
+    sessions = [
+      {
+        createdAt: NOW,
+        id: "s-other",
+        pinned: false,
+        title: "Other chat",
+        updatedAt: NOW,
+      },
+      {
+        createdAt: NOW,
+        id: "s-open",
+        pinned: false,
+        title: "Open chat",
+        updatedAt: NOW,
+      },
+    ];
+    sessionEntries = [
+      {
+        content: [{ text: "Open chat message", type: "text" }],
+        createdAt: NOW,
+        id: "e-open",
+        parentId: null,
+        role: "user",
+        type: "message",
+      },
+    ];
+    let deleteCalls = 0;
+    mockIPC((command, payload) => {
+      if (command === "delete_session") {
+        const { params } = payload as {
+          params: { sessionId: string };
+        };
+        deleteCalls += 1;
+        sessions = sessions.filter(
+          (session) => session.id !== params.sessionId,
+        );
+        return null;
+      }
+      return baseIpcHandler(command, payload);
+    });
+    renderApp();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open chat" }));
+    expect(await screen.findByText("Open chat message")).toBeTruthy();
+
+    const otherRow = screen.getByRole("button", { name: "Other chat" });
+    fireEvent.click(
+      within(otherRow).getByRole("button", { name: "Delete chat" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Delete chat" }),
+    );
+    await waitFor(() => {
+      expect(deleteCalls).toBe(1);
+    });
+
+    // The deleted row leaves the sidebar after its exit animation; the
+    // loaded page keeps its shape (no list reset, no selection change).
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Other chat" })).toBeNull();
+    });
+    expect(useUiStore.getState().activeSessionId).toBe("s-open");
+    expect(screen.getByText("Open chat message")).toBeTruthy();
+    expect(screen.queryByText("How can I help you today?")).toBeNull();
   });
 });
