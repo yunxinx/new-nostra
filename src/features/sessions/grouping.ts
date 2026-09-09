@@ -1,12 +1,12 @@
-import type { MockSession, MockSessionGroup } from "./mock";
+import type { Session } from "@/types/ipc";
 
 export interface SessionGroup {
   key: SessionGroupKey;
-  sessions: MockSession[];
+  sessions: Session[];
 }
 
 export type SessionGroupKey =
-  "earlier" | "favorites" | "thisMonth" | MockSessionGroup;
+  "earlier" | "favorites" | "thisMonth" | "thisWeek" | "today" | "yesterday";
 
 // Sidebar display order; empty groups are dropped by groupSessions.
 const GROUP_ORDER: readonly SessionGroupKey[] = [
@@ -18,16 +18,59 @@ const GROUP_ORDER: readonly SessionGroupKey[] = [
   "earlier",
 ];
 
+const MS_PER_DAY = 86_400_000;
+
+// Buckets the standard (non-pinned) stream by local calendar time; rows keep
+// their keyset order. The favorites group is not derived here — the pinned
+// query feeds it directly, so pinned sessions never need a time bucket.
 export function groupSessions(
-  sessions: readonly MockSession[],
+  sessions: readonly Session[],
+  now: Date = new Date(),
 ): SessionGroup[] {
-  return GROUP_ORDER.map((key) => ({
-    key,
-    sessions: sessions.filter((session) => effectiveGroupKey(session) === key),
-  })).filter((group) => group.sessions.length > 0);
+  const buckets = new Map<SessionGroupKey, Session[]>();
+  for (const session of sessions) {
+    const key = timeGroupKey(session.updatedAt, now);
+    const bucket = buckets.get(key);
+    if (bucket) {
+      bucket.push(session);
+    } else {
+      buckets.set(key, [session]);
+    }
+  }
+  return GROUP_ORDER.flatMap((key) => {
+    if (key === "favorites") {
+      return [];
+    }
+    const bucket = buckets.get(key);
+    return bucket ? [{ key, sessions: bucket }] : [];
+  });
 }
 
-function effectiveGroupKey(session: MockSession): SessionGroupKey {
-  // Favorites is a manual bucket that overrides the time bucket.
-  return session.starred ? "favorites" : session.group;
+// Local calendar-day index, comparable across dates in any timezone.
+function localDayIndex(date: Date): number {
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function timeGroupKey(updatedAt: string, now: Date): SessionGroupKey {
+  const updated = new Date(updatedAt);
+  // Rounding absorbs DST-shifted local midnights, which are off by an hour.
+  const dayDelta = Math.round(
+    (localDayIndex(now) - localDayIndex(updated)) / MS_PER_DAY,
+  );
+  if (dayDelta <= 0) {
+    return "today";
+  }
+  if (dayDelta === 1) {
+    return "yesterday";
+  }
+  if (dayDelta <= 7) {
+    return "thisWeek";
+  }
+  if (
+    updated.getFullYear() === now.getFullYear() &&
+    updated.getMonth() === now.getMonth()
+  ) {
+    return "thisMonth";
+  }
+  return "earlier";
 }

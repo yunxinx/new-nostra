@@ -4,11 +4,20 @@
     "collapseSidebar": "Collapse sidebar",
     "expandSidebar": "Expand sidebar"
   },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "retry": "Retry"
+  },
   "sessions": {
     "delete": "Delete chat",
+    "deleteConfirm": "Delete this chat? This cannot be undone.",
     "favorite": "Favorite",
     "unfavorite": "Unfavorite",
     "empty": "No conversations yet",
+    "loadMore": "Load more",
+    "rename": "Rename",
+    "title": "Title",
     "groups": {
       "favorites": "Favorites",
       "today": "Today",
@@ -28,6 +37,7 @@
     "composer": {
       "placeholder": "Send a message. Enter to send, Shift+Enter for newline.",
       "send": "Send",
+      "sending": "Sending…",
       "attach": "Attach"
     },
     "copyCode": "Copy code",

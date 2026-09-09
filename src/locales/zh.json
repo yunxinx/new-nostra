@@ -4,11 +4,20 @@
     "collapseSidebar": "折叠侧栏",
     "expandSidebar": "展开侧栏"
   },
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "retry": "重试"
+  },
   "sessions": {
     "delete": "删除聊天",
+    "deleteConfirm": "删除该会话？删除后无法恢复。",
     "favorite": "收藏",
     "unfavorite": "取消收藏",
     "empty": "还没有会话",
+    "loadMore": "加载更多",
+    "rename": "重命名",
+    "title": "标题",
     "groups": {
       "favorites": "收藏",
       "today": "今天",
@@ -28,6 +37,7 @@
     "composer": {
       "placeholder": "发送消息。Enter 发送，Shift+Enter 换行。",
       "send": "发送",
+      "sending": "发送中…",
       "attach": "添加附件"
     },
     "copyCode": "复制代码",
