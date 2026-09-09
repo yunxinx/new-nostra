@@ -1,9 +1,11 @@
 // Tests may use unwrap/expect on fixtures; production paths must propagate errors.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+mod commands;
 mod db;
 mod error;
 mod state;
+mod types;
 
 use tauri::Manager;
 
@@ -61,6 +63,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .invoke_handler(commands::handler())
         .setup(|app| {
             let connection = db::init(app.handle())?;
             app.manage(state::AppState { db: tokio::sync::Mutex::new(connection) });

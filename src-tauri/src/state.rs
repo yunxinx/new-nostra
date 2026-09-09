@@ -3,9 +3,6 @@ use tokio::sync::Mutex;
 
 /// Global app state managed by Tauri. The connection is a single SQLite handle
 /// guarded by a tokio Mutex so async commands can hold it across await points.
-// Reason: scaffold contract — consumed by the first DB-touching command domain.
-// Revoke when a production command reads AppState.db.
-#[allow(dead_code)]
 pub struct AppState {
     pub db: Mutex<Connection>,
 }

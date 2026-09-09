@@ -11,17 +11,19 @@ pub struct AppError {
     pub message: String,
 }
 
-// Reason: contract surface mirrored in types/ipc.ts and locales errors.*; codes
-// are produced by feature domains as they land (LLM/network, sessions, settings).
-// Revoke when every variant is constructed on a production path.
-#[allow(dead_code)]
 #[derive(Debug, Error, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     #[error("database error")]
     Db,
+    // Reason: contract surface mirrored in types/ipc.ts and locales errors.*;
+    // produced by the LLM domain (M3). Revoke when a production path constructs it.
+    #[allow(dead_code)]
     #[error("network error")]
     Network,
+    // Reason: contract surface mirrored in types/ipc.ts and locales errors.*;
+    // produced by the provider protocol domain (M3). Revoke when constructed.
+    #[allow(dead_code)]
     #[error("provider protocol error")]
     Protocol,
     #[error("invalid configuration")]

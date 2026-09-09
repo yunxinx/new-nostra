@@ -1,6 +1,7 @@
 //! Connection management and migrations for the single SQLite database.
 
 mod migrations;
+pub mod repo;
 
 use std::fs;
 use std::path::PathBuf;
@@ -32,6 +33,9 @@ pub fn init(app: &AppHandle) -> Result<Connection, AppError> {
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", true)?;
     conn.pragma_update(None, "busy_timeout", 5000)?;
+    // NORMAL skips WAL fsync on ordinary commits; power loss may roll back recent
+    // commits, but ordinary app restart and process-crash recovery are preserved.
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
 
     run_migrations(&conn)?;
     log::info!("database ready at {}", dir.join(DB_FILE_NAME).display());
