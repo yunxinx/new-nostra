@@ -25,7 +25,7 @@ export function SessionList() {
   >(new Set());
 
   const favoritesGroup =
-    pinned.sessions.length > 0
+    pinned.sessions.length > 0 || pinned.hasNextPage
       ? { key: "favorites" as const, sessions: pinned.sessions }
       : null;
   const timeGroups = groupSessions(standard.sessions);
@@ -74,11 +74,11 @@ export function SessionList() {
     <div className="min-h-0 flex-1 overflow-y-auto p-2" onScroll={handleScroll}>
       <div className="flex flex-col gap-1">
         {pinned.isLoading && <LoadingRows />}
-        {pinned.error !== null && pinned.sessions.length === 0 && (
+        {pinned.error !== null && (
           <StreamErrorRow error={pinned.error} retry={pinned.retry} />
         )}
         {standard.isLoading && <LoadingRows />}
-        {standard.error !== null && standard.sessions.length === 0 && (
+        {standard.error !== null && (
           <StreamErrorRow error={standard.error} retry={standard.retry} />
         )}
         {groups.map((group) => {

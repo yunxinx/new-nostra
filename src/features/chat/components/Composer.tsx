@@ -1,5 +1,5 @@
 import { ArrowUp, Plus } from "lucide-react";
-import { type KeyboardEvent, useEffect, useRef } from "react";
+import { type KeyboardEvent, useContext, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AppError } from "@/types/ipc";
@@ -10,6 +10,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+
+import { ComposerFocusContext } from "../composer-focus-context";
 
 const LINE_HEIGHT_PX = 20;
 // 8 lines of text-sm (14px/20px line-height); taller input scrolls internally.
@@ -34,6 +36,7 @@ export function Composer({
   value,
 }: ComposerProps) {
   const { t } = useTranslation();
+  const focusRequest = useContext(ComposerFocusContext);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -46,6 +49,17 @@ export function Composer({
     const clampedHeight = Math.min(textarea.scrollHeight, MAX_TEXT_HEIGHT_PX);
     textarea.style.height = `${String(clampedHeight)}px`;
   }, [value]);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!focusRequest?.shouldRestoreFocus || disabled || !textarea) {
+      return;
+    }
+    if (document.activeElement === document.body) {
+      textarea.focus();
+    }
+    focusRequest.onFocusRestored();
+  }, [disabled, focusRequest]);
 
   function handleSubmit(): void {
     const text = value.trim();

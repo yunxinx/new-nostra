@@ -113,6 +113,7 @@ function ChatPane({ composerKey, onSend, path, sessionId }: ChatPaneProps) {
   // the current value without re-subscribing; the state only feeds the jump
   // button's visibility.
   const isNearBottomRef = useRef(true);
+  const hasNewerPagesRef = useRef(path.hasNewerPages);
   const anchorRef = useRef<AnchorSnapshot | null>(null);
   const [composerHeight, setComposerHeight] = useState(
     COMPOSER_HEIGHT_FALLBACK_PX,
@@ -136,6 +137,10 @@ function ChatPane({ composerKey, onSend, path, sessionId }: ChatPaneProps) {
   );
   const setDraft = useUiStore((s) => s.setDraft);
 
+  useLayoutEffect(() => {
+    hasNewerPagesRef.current = path.hasNewerPages;
+  }, [path.hasNewerPages]);
+
   useEffect(() => {
     const composer = composerRef.current;
     if (!composer) {
@@ -158,7 +163,7 @@ function ChatPane({ composerKey, onSend, path, sessionId }: ChatPaneProps) {
       return;
     }
     const observer = new ResizeObserver(() => {
-      if (isNearBottomRef.current) {
+      if (isNearBottomRef.current && !hasNewerPagesRef.current) {
         container.scrollTop = container.scrollHeight;
       } else {
         compensateAroundAnchor(container, anchorRef);
@@ -173,14 +178,14 @@ function ChatPane({ composerKey, onSend, path, sessionId }: ChatPaneProps) {
     if (!container) {
       return;
     }
-    if (isNearBottomRef.current) {
+    if (isNearBottomRef.current && !path.hasNewerPages) {
       container.scrollTop = container.scrollHeight;
       return;
     }
     compensateAroundAnchor(container, anchorRef);
     // The token, not the message count, drives re-runs: a full-page swap at
     // the newest end leaves the length unchanged while content moves.
-  }, [contentToken, composerHeight]);
+  }, [contentToken, composerHeight, path.hasNewerPages]);
 
   function handleScroll(): void {
     const container = scrollRef.current;
@@ -189,7 +194,8 @@ function ChatPane({ composerKey, onSend, path, sessionId }: ChatPaneProps) {
     }
     const distanceFromBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight;
-    const nearBottom = distanceFromBottom < BOTTOM_FOLLOW_THRESHOLD_PX;
+    const nearBottom =
+      !path.hasNewerPages && distanceFromBottom < BOTTOM_FOLLOW_THRESHOLD_PX;
     if (nearBottom !== isNearBottomRef.current) {
       isNearBottomRef.current = nearBottom;
       setIsNearBottom(nearBottom);
@@ -233,6 +239,26 @@ function ChatPane({ composerKey, onSend, path, sessionId }: ChatPaneProps) {
   }
 
   const isJumpVisible = path.hasNewerPages || (hasContent && !isNearBottom);
+
+  const { loadOlder } = path;
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container || !path.hasOlderPages || path.error !== null) {
+      return;
+    }
+    const loadOlderIfNeeded = () => {
+      if (
+        container.clientHeight > 0 &&
+        container.scrollHeight <= container.clientHeight
+      ) {
+        loadOlder();
+      }
+    };
+    const observer = new ResizeObserver(loadOlderIfNeeded);
+    observer.observe(container);
+    loadOlderIfNeeded();
+    return () => observer.disconnect();
+  }, [contentToken, path.error, path.hasOlderPages, loadOlder]);
 
   return (
     <div className="relative h-full min-h-0">

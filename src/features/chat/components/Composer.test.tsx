@@ -6,6 +6,7 @@ import type { AppError } from "@/types/ipc";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { initI18n } from "@/lib/i18n";
 
+import { ComposerFocusContext } from "../composer-focus-context";
 import { Composer } from "./Composer";
 
 const DB_ERROR: AppError = { code: "db", message: "append failed" };
@@ -90,5 +91,83 @@ describe("Composer", () => {
     expect(screen.getByRole("alert").textContent).toBe("Database error");
     expect(input).toHaveProperty("value", "你好");
     expect(input).toHaveProperty("disabled", false);
+  });
+
+  it("restores keyboard focus after a pending submission settles", () => {
+    const onFocusRestored = vi.fn();
+    const onTextChange = vi.fn<(text: string) => void>();
+    const focusRequest = { onFocusRestored, shouldRestoreFocus: true };
+    const { rerender } = render(
+      <TooltipProvider>
+        <ComposerFocusContext value={focusRequest}>
+          <Composer
+            disabled
+            error={null}
+            onSend={() => undefined}
+            onTextChange={onTextChange}
+            value="hello"
+          />
+        </ComposerFocusContext>
+      </TooltipProvider>,
+    );
+
+    rerender(
+      <TooltipProvider>
+        <ComposerFocusContext value={focusRequest}>
+          <Composer
+            disabled={false}
+            error={null}
+            onSend={() => undefined}
+            onTextChange={onTextChange}
+            value="hello"
+          />
+        </ComposerFocusContext>
+      </TooltipProvider>,
+    );
+
+    expect(document.activeElement).toBe(screen.getByRole("textbox"));
+    expect(onFocusRestored).toHaveBeenCalledExactlyOnceWith();
+  });
+
+  it("does not take focus from another control", () => {
+    const onFocusRestored = vi.fn();
+    const onTextChange = vi.fn<(text: string) => void>();
+    const focusRequest = { onFocusRestored, shouldRestoreFocus: true };
+    const { rerender } = render(
+      <TooltipProvider>
+        <button type="button">Other control</button>
+        <ComposerFocusContext value={focusRequest}>
+          <Composer
+            disabled
+            error={null}
+            onSend={() => undefined}
+            onTextChange={onTextChange}
+            value="hello"
+          />
+        </ComposerFocusContext>
+      </TooltipProvider>,
+    );
+    const otherControl = screen.getByRole("button", {
+      name: "Other control",
+    });
+    otherControl.focus();
+
+    rerender(
+      <TooltipProvider>
+        <button type="button">Other control</button>
+        <ComposerFocusContext value={focusRequest}>
+          <Composer
+            disabled={false}
+            error={null}
+            onSend={() => undefined}
+            onTextChange={onTextChange}
+            value="hello"
+          />
+        </ComposerFocusContext>
+      </TooltipProvider>,
+    );
+
+    expect(document.activeElement).toBe(otherControl);
+    expect(onFocusRestored).toHaveBeenCalledExactlyOnceWith();
   });
 });

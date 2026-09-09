@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import {
+  InfiniteQueryObserver,
   onlineManager,
   QueryClient,
   QueryClientProvider,
@@ -318,6 +319,62 @@ describe("useSendMessage first send", () => {
         ?.pages[0]?.sessions,
     ).toEqual([]);
     expect(useUiStore.getState().enteringSessionId).toBe("s-new-1");
+  });
+
+  it("restarts a cancelled first list read after creation", async () => {
+    let reads = 0;
+    const observer = new InfiniteQueryObserver(queryClient, {
+      getNextPageParam: (page: SessionPage) => page.nextCursor,
+      initialPageParam: null,
+      queryFn: () => {
+        reads += 1;
+        return reads === 1
+          ? new Promise<SessionPage>(() => undefined)
+          : Promise.resolve({ nextCursor: null, sessions: [] });
+      },
+      queryKey: sessionsKeys.list(false),
+    });
+    const unsubscribe = observer.subscribe(() => undefined);
+    try {
+      const { result } = renderSendHarness(null);
+      act(() => result.current.send(draftTarget(), "created"));
+      await waitFor(() => {
+        expect(reads).toBe(2);
+        expect(observer.getCurrentResult().isSuccess).toBe(true);
+      });
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("keeps a created row after an in-flight next page resolves", async () => {
+    seedListCaches();
+    let resolvePage: ((page: SessionPage) => void) | undefined;
+    const observer = new InfiniteQueryObserver(queryClient, {
+      getNextPageParam: () => "next",
+      initialPageParam: null,
+      queryFn: () =>
+        new Promise<SessionPage>((resolve) => {
+          resolvePage = resolve;
+        }),
+      queryKey: sessionsKeys.list(false),
+    });
+    const read = observer.fetchNextPage();
+    await waitFor(() => expect(resolvePage).toBeDefined());
+    const { result } = renderSendHarness(null);
+    act(() => result.current.send(draftTarget(), "created"));
+    await waitFor(() =>
+      expect(useUiStore.getState().pendingSubmits.size).toBe(0),
+    );
+    await act(async () => {
+      resolvePage?.({ nextCursor: null, sessions: [] });
+      await read;
+    });
+    expect(
+      queryClient
+        .getQueryData<SessionListData>(sessionsKeys.list(false))
+        ?.pages.flatMap((page) => page.sessions.map((row) => row.id)),
+    ).toEqual(["s-new-1"]);
   });
 
   it("commits only once when double Enter straddles the guard flip", async () => {

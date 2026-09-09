@@ -6,6 +6,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { Profiler } from "react";
@@ -113,6 +114,54 @@ describe("SessionRow", () => {
         params: { pinned: true, sessionId: "s1" },
       },
     ]);
+  });
+
+  it.each([false, true])(
+    "shows a failed pin write and permits retry (pinned=%s)",
+    async (pinned) => {
+      failCommand = "set_session_pinned";
+      renderRow(makeSession({ pinned }));
+      const button = screen.getByRole("button", {
+        name: pinned ? "Unfavorite" : "Favorite",
+      });
+      fireEvent.click(button);
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "Database error",
+      );
+      expect(button).toHaveProperty("disabled", false);
+      failCommand = null;
+      fireEvent.click(button);
+      await act(async () => {});
+      await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    },
+  );
+
+  it("opens rename from F2 on the focused row without selecting it", async () => {
+    const onSelect = vi.fn();
+    renderRow(makeSession(), onSelect);
+    const row = screen.getByRole("button", { name: "Original title" });
+    row.focus();
+    fireEvent.keyDown(row, { key: "F2" });
+    const input = await screen.findByLabelText("Title");
+    expect(document.activeElement).toBe(input);
+    expect(onSelect).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "Keyboard title" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => {});
+    expect(calls).toEqual([
+      {
+        command: "rename_session",
+        params: { sessionId: "s1", title: "Keyboard title" },
+      },
+    ]);
+  });
+
+  it("does not open rename from F2 on a nested action", () => {
+    renderRow(makeSession());
+    const button = screen.getByRole("button", { name: "Favorite" });
+    button.focus();
+    fireEvent.keyDown(button, { key: "F2" });
+    expect(screen.queryByLabelText("Title")).toBeNull();
   });
 
   it("opens inline edit from a double-click anywhere on the row", async () => {

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -167,6 +168,69 @@ afterEach(() => {
 });
 
 describe("send round trip", () => {
+  it("restores focus in the remounted composer after the first send", async () => {
+    renderApp();
+    const input = screen.getByRole("textbox");
+    input.focus();
+    await submitComposer(FIRST_MESSAGE);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole("textbox"));
+    });
+    expect(screen.getByRole("textbox")).not.toBe(input);
+  });
+
+  it("restores focus after a failed append for Enter retry", async () => {
+    renderApp();
+    await submitComposer(FIRST_MESSAGE);
+    let rejectAppend: () => void = () => undefined;
+    mockIPC((command, payload) => {
+      if (command === "append_message") {
+        return new Promise<unknown>((_resolve, reject) => {
+          rejectAppend = () =>
+            // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- Tauri mock rejects with the AppError JSON shape; remove when mock rejections are typed.
+            reject({ code: "db", message: "write failed" });
+        });
+      }
+      return baseIpcHandler(command, payload);
+    });
+    const input = screen.getByRole("textbox");
+    input.focus();
+    fireEvent.change(input, { target: { value: "retry text" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(input).toHaveProperty("disabled", true));
+    input.blur();
+    act(() => rejectAppend());
+    await screen.findByRole("alert");
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    expect(input).toHaveProperty("value", "retry text");
+  });
+
+  it("does not focus a late first-send result after changing drafts", async () => {
+    let finishCreate: () => void = () => undefined;
+    mockIPC((command, payload) => {
+      if (command === "create_session") {
+        return new Promise<unknown>((resolve) => {
+          finishCreate = () => resolve(baseIpcHandler(command, payload));
+        });
+      }
+      return baseIpcHandler(command, payload);
+    });
+    renderApp();
+    const input = screen.getByRole("textbox");
+    input.focus();
+    fireEvent.change(input, { target: { value: FIRST_MESSAGE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(input).toHaveProperty("disabled", true));
+    const newChat = screen.getByRole("button", { name: "New chat" });
+    fireEvent.pointerDown(newChat);
+    newChat.focus();
+    fireEvent.click(newChat);
+    act(() => finishCreate());
+    await screen.findByRole("button", { name: FIRST_TITLE });
+    expect(document.activeElement).toBe(newChat);
+    expect(useUiStore.getState().activeSessionId).toBeNull();
+  });
+
   it("persists the first send, then appends into the opened session", async () => {
     renderApp();
 

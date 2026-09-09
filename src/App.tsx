@@ -1,6 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SquarePen } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { TitleBarControls } from "@/components/common/TitleBarControls";
@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useTheme } from "@/features/appearance/use-theme";
 import { MessageList } from "@/features/chat/components/MessageList";
+import { ComposerFocusContext } from "@/features/chat/composer-focus-context";
 import { Sidebar } from "@/features/sessions/components/Sidebar";
 import { SidebarToggleButton } from "@/features/sessions/components/SidebarToggleButton";
 import { useSidebarPersistence } from "@/features/sessions/use-sidebar-persistence";
@@ -29,7 +30,12 @@ export function App() {
   const { send } = useSendMessage();
   const activeSessionId = useUiStore((s) => s.activeSessionId);
   const draftId = useUiStore((s) => s.draftId);
+  const composerKey = activeSessionId ?? draftKeyFor(draftId);
   const startNewChat = useUiStore((s) => s.startNewChat);
+  const [composerFocusKey, setComposerFocusKey] = useState<null | string>(null);
+  const cancelFocusTrackingRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => () => cancelFocusTrackingRef.current?.(), []);
 
   // The window is created hidden (geometry restores offscreen of view).
   // WebKit never schedules requestAnimationFrame while the host window is
@@ -45,13 +51,54 @@ export function App() {
   }, []);
 
   function handleSend(text: string): void {
+    const store = useUiStore.getState();
+    if (
+      text.trim().length === 0 ||
+      store.pendingSubmits.has(composerKey) ||
+      (activeSessionId !== null && store.pendingDeletes.has(activeSessionId))
+    ) {
+      return;
+    }
+    cancelFocusTrackingRef.current?.();
+    setComposerFocusKey(null);
+    const source = document.activeElement;
+    let shouldRestoreFocus = true;
+    function cancelFocus(): void {
+      shouldRestoreFocus = false;
+    }
+    function handleFocus(event: FocusEvent): void {
+      if (event.target !== source && event.target !== document.body) {
+        cancelFocus();
+      }
+    }
+    function stopTracking(): void {
+      document.removeEventListener("pointerdown", cancelFocus, true);
+      document.removeEventListener("focusin", handleFocus, true);
+      shouldRestoreFocus = false;
+    }
+    document.addEventListener("pointerdown", cancelFocus, true);
+    document.addEventListener("focusin", handleFocus, true);
+    cancelFocusTrackingRef.current = stopTracking;
     send(
       {
         draftId,
-        draftKey: activeSessionId ?? draftKeyFor(draftId),
+        draftKey: composerKey,
         sessionId: activeSessionId,
       },
       text,
+      (sessionId) => {
+        const store = useUiStore.getState();
+        const canRestoreFocus =
+          shouldRestoreFocus &&
+          store.draftId === draftId &&
+          store.activeSessionId === sessionId &&
+          (document.activeElement === document.body ||
+            document.activeElement === source);
+        stopTracking();
+        if (canRestoreFocus) {
+          setComposerFocusKey(sessionId ?? draftKeyFor(draftId));
+        }
+      },
     );
   }
 
@@ -68,21 +115,19 @@ export function App() {
               fails. A null selection is the new-chat draft; the draft key
               change discards the previous draft's component state, while the
               message window and drafts have their own owners. */}
-          {activeSessionId !== null ? (
+          <ComposerFocusContext
+            value={{
+              onFocusRestored: () => setComposerFocusKey(null),
+              shouldRestoreFocus: composerFocusKey === composerKey,
+            }}
+          >
             <MessageList
-              composerKey={activeSessionId}
-              key={activeSessionId}
+              composerKey={composerKey}
+              key={composerKey}
               onSend={handleSend}
               sessionId={activeSessionId}
             />
-          ) : (
-            <MessageList
-              composerKey={draftKeyFor(draftId)}
-              key={draftKeyFor(draftId)}
-              onSend={handleSend}
-              sessionId={null}
-            />
-          )}
+          </ComposerFocusContext>
         </section>
       </main>
       <TitleBarControls>

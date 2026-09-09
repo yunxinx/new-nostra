@@ -15,18 +15,18 @@ import {
   createTailWindow,
   type MessageWindow,
 } from "@/lib/message-window";
-import { messagesKeys, sessionsKeys } from "@/lib/query-keys";
-import {
-  moveSessionToHead,
-  prependSessionToFirstPage,
-  type SessionListData,
-} from "@/lib/session-list-cache";
+import { messagesKeys } from "@/lib/query-keys";
+import { updateSessionLists } from "@/lib/update-session-lists";
 import { useUiStore } from "@/stores/ui-store";
 
 const TITLE_MAX_CODE_POINTS = 50;
 
 export interface SendMessageResult {
-  send: (target: SendTarget, text: string) => void;
+  send: (
+    target: SendTarget,
+    text: string,
+    onSettled?: (sessionId: null | string) => void,
+  ) => void;
 }
 
 /**
@@ -46,6 +46,7 @@ type SendResult =
   | { entry: Entry; kind: "append" };
 
 interface SendVariables {
+  onSettled: ((sessionId: null | string) => void) | undefined;
   target: SendTarget;
   text: string;
 }
@@ -86,21 +87,29 @@ export function useSendMessage(): SendMessageResult {
         });
       }
     },
-    onSettled: (_result, _error, variables) => {
+    onSettled: (result, _error, variables) => {
       useUiStore.getState().endSubmit(variables.target.draftKey);
+      variables.onSettled?.(
+        result?.kind === "create"
+          ? result.created.session.id
+          : variables.target.sessionId,
+      );
     },
     onSuccess: async (result, variables) => {
       // The database commit already succeeded; a later cache read failure
-      // surfaces through the messages query error instead of failing this
-      // send: the kernel's reset/refetch aggregation swallows fetch errors.
+      // surfaces through its query instead of failing this send: the
+      // kernel's reset/refetch aggregation swallows fetch errors.
       if (result.kind === "append") {
         await landAppend(result.entry, variables);
-        await reflectAppendInLists(
-          variables.target.sessionId,
-          result.entry.createdAt,
-        );
+        if (variables.target.sessionId !== null) {
+          await updateSessionLists(queryClient, {
+            kind: "append",
+            sessionId: variables.target.sessionId,
+            updatedAt: result.entry.createdAt,
+          });
+        }
       } else {
-        landCreate(result.created, variables);
+        await landCreate(result.created, variables);
       }
       useUiStore
         .getState()
@@ -118,15 +127,12 @@ export function useSendMessage(): SendMessageResult {
       return;
     }
     const key = messagesKeys.bySession(sessionId);
+    await queryClient.cancelQueries({ queryKey: key });
     const merged = appendEntryToWindow(
       queryClient.getQueryData<MessageWindow>(key),
       entry,
     );
     if (merged !== null) {
-      // A page read that started while the write was in flight is cancelled
-      // (revert) before the merge: the kernel drops a cancelled read's late
-      // resolution, so no stale page lands on the merged window.
-      await queryClient.cancelQueries({ queryKey: key });
       queryClient.setQueryData(key, merged);
     } else {
       // Missing cache, evicted tail, or parent discontinuity: no gap-free
@@ -135,21 +141,16 @@ export function useSendMessage(): SendMessageResult {
     }
   }
 
-  function landCreate(created: CreatedSession, variables: SendVariables): void {
+  async function landCreate(
+    created: CreatedSession,
+    variables: SendVariables,
+  ): Promise<void> {
     const key = messagesKeys.bySession(created.session.id);
     queryClient.setQueryData(key, createTailWindow(created.entry));
-    // The sidebar keeps its loaded page structure: the new session joins the
-    // standard list's first page at the head (its updatedAt is the newest);
-    // a list the UI has not loaded yet reads it on its next mount. The new
-    // row announces itself with the enter animation.
-    const listKey = sessionsKeys.list(false);
-    const prepended = prependSessionToFirstPage(
-      queryClient.getQueryData<SessionListData>(listKey),
-      created.session,
-    );
-    if (prepended !== null) {
-      queryClient.setQueryData(listKey, prepended);
-    }
+    await updateSessionLists(queryClient, {
+      kind: "create",
+      session: created.session,
+    });
     useUiStore.getState().setEnteringSession(created.session.id);
     const store = useUiStore.getState();
     // The new session takes over the view only while the user still sits on
@@ -163,36 +164,11 @@ export function useSendMessage(): SendMessageResult {
     }
   }
 
-  // Reflects the append's activity bump in the sidebar: the row moves to the
-  // head of whichever loaded list holds it. A row outside the loaded pages
-  // cannot be positioned without inventing data, so the lists fall back to
-  // invalidation and the active observers refetch with their stored pages.
-  async function reflectAppendInLists(
-    sessionId: null | string,
-    updatedAt: string,
-  ): Promise<void> {
-    if (sessionId === null) {
-      return;
-    }
-    let moved = false;
-    for (const pinned of [false, true]) {
-      const key = sessionsKeys.list(pinned);
-      const next = moveSessionToHead(
-        queryClient.getQueryData<SessionListData>(key),
-        sessionId,
-        updatedAt,
-      );
-      if (next !== null) {
-        queryClient.setQueryData(key, next);
-        moved = true;
-      }
-    }
-    if (!moved) {
-      await queryClient.invalidateQueries({ queryKey: sessionsKeys.lists() });
-    }
-  }
-
-  function send(target: SendTarget, text: string): void {
+  function send(
+    target: SendTarget,
+    text: string,
+    onSettled?: (sessionId: null | string) => void,
+  ): void {
     const trimmed = text.trim();
     if (trimmed.length === 0) {
       return;
@@ -213,7 +189,7 @@ export function useSendMessage(): SendMessageResult {
     }
     store.beginSubmit(target.draftKey);
     store.setDraftError(target.draftKey, null);
-    mutation.mutate({ target, text: trimmed });
+    mutation.mutate({ onSettled, target, text: trimmed });
   }
 
   return { send };

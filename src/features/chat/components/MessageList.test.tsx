@@ -78,6 +78,7 @@ let virtualScrollTop: number;
 let layout: Record<string, number>;
 let contentHeightPadding: number;
 let failTailRead: boolean;
+let olderPageReads: number;
 let rectSpy: ReturnType<typeof spyRect>;
 
 function attachScrollModel(container: HTMLElement): void {
@@ -125,8 +126,14 @@ function entry(id: string, parentId: null | string): Entry {
   };
 }
 
-function page(entries: Entry[]): PathPage {
-  return { entries, nextCursor: null, prevCursor: null };
+function page(
+  entries: Entry[],
+  {
+    nextCursor = null,
+    prevCursor = null,
+  }: Partial<Pick<PathPage, "nextCursor" | "prevCursor">> = {},
+): PathPage {
+  return { entries, nextCursor, prevCursor };
 }
 
 function renderMessageList(sessionId: null | string) {
@@ -197,6 +204,7 @@ beforeEach(() => {
   layout = {};
   contentHeightPadding = 0;
   failTailRead = false;
+  olderPageReads = 0;
   TestResizeObserver.instances = [];
   vi.stubGlobal("ResizeObserver", TestResizeObserver);
   rectSpy = spyRect();
@@ -207,6 +215,13 @@ beforeEach(() => {
         throw { code: "db", message: "read failed" };
       }
       return page(buildEntries(10));
+    }
+    if (command === "load_active_path_before") {
+      olderPageReads += 1;
+      return page(buildEntries(10, "old"));
+    }
+    if (command === "load_active_path_after") {
+      return new Promise<PathPage>(() => undefined);
     }
     throw new Error(`Unexpected IPC command: ${command}`);
   });
@@ -304,6 +319,79 @@ describe("MessageList scroll anchoring", () => {
     const jump = screen.getByRole("button", { name: "Jump to latest" });
     fireEvent.click(jump);
     expect(virtualScrollTop).toBe(800);
+  });
+
+  it("keeps the history anchor at a window-only bottom", async () => {
+    const entries = buildEntries(10);
+    for (const node of entries) {
+      layout[node.id] = Number(node.id.slice(1)) * ENTRY_HEIGHT;
+    }
+    queryClient.setQueryData<MessageWindow>(
+      messagesKeys.bySession(SESSION_ID),
+      {
+        pageParams: [{ kind: "tail" }],
+        pages: [page(entries)],
+      },
+    );
+    renderMessageList(SESSION_ID);
+    const container = await scrollContainer();
+
+    act(() => {
+      queryClient.setQueryData<MessageWindow>(
+        messagesKeys.bySession(SESSION_ID),
+        {
+          pageParams: [{ kind: "tail" }],
+          pages: [page(entries, { nextCursor: "newer" })],
+        },
+      );
+    });
+    await screen.findByRole("button", { name: "Jump to latest" });
+    setVirtualScroll(800, container);
+    expect(screen.getByRole("button", { name: "Jump to latest" })).toBeTruthy();
+
+    const newer = entry("newer", "e9");
+    layout[newer.id] = 10 * ENTRY_HEIGHT;
+    act(() => {
+      queryClient.setQueryData<MessageWindow>(
+        messagesKeys.bySession(SESSION_ID),
+        {
+          pageParams: [{ kind: "tail" }],
+          pages: [page([...entries, newer], { nextCursor: "newer" })],
+        },
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByText("mnewer")).toBeTruthy();
+    });
+
+    expect(virtualScrollTop).toBe(800);
+  });
+
+  it("loads older pages until the first viewport can scroll", async () => {
+    const entries = buildEntries(10);
+    for (const node of entries) {
+      layout[node.id] = Number(node.id.slice(1)) * ENTRY_HEIGHT;
+    }
+    queryClient.setQueryData<MessageWindow>(
+      messagesKeys.bySession(SESSION_ID),
+      {
+        pageParams: [{ kind: "tail" }],
+        pages: [page(entries, { prevCursor: "older" })],
+      },
+    );
+    renderMessageList(SESSION_ID);
+    const container = await scrollContainer();
+    contentHeightPadding = -900;
+
+    act(() => {
+      TestResizeObserver.instances
+        .find((observer) => observer.target === container)
+        ?.resize(200);
+    });
+
+    await waitFor(() => {
+      expect(olderPageReads).toBe(1);
+    });
   });
 });
 

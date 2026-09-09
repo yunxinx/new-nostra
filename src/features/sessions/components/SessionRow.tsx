@@ -79,9 +79,11 @@ export function SessionRow({ isActive, onSelect, session }: SessionRowProps) {
   // The edit takes over the row's interactive surface; the action cluster
   // and the hover ramp would only collide with the input.
   const isActionClusterHidden = isEditingTitle || isExiting;
+  const actionError = remove.error ?? pin.error;
 
   function handleDeleteConfirm(): void {
     setIsDeleteOpen(false);
+    pin.reset();
     setIsExiting(true);
     remove.mutate(
       { sessionId: session.id },
@@ -103,7 +105,10 @@ export function SessionRow({ isActive, onSelect, session }: SessionRowProps) {
     if (isExiting) {
       return;
     }
-    if (event.key === "Enter" || event.key === " ") {
+    if (event.key === "F2") {
+      event.preventDefault();
+      setIsEditingTitle(true);
+    } else if (event.key === "Enter" || event.key === " ") {
       // Prevent Space from scrolling the sidebar list.
       event.preventDefault();
       onSelect(session.id);
@@ -113,6 +118,7 @@ export function SessionRow({ isActive, onSelect, session }: SessionRowProps) {
   return (
     <div
       aria-current={isActive ? "true" : undefined}
+      aria-keyshortcuts="F2"
       aria-label={session.title}
       className={cn(
         "text-sidebar-foreground group/row focus-visible:ring-ring/50 relative flex h-8 items-center rounded-[6px] px-2 text-sm outline-none select-none focus-visible:ring-3",
@@ -146,12 +152,12 @@ export function SessionRow({ isActive, onSelect, session }: SessionRowProps) {
       ) : (
         <>
           <span className="min-w-0 flex-1 truncate">{session.title}</span>
-          {remove.error !== null && !isExiting && (
+          {actionError !== null && !isExiting && (
             <p
               className="text-destructive max-w-[120px] shrink-0 truncate text-xs"
               role="alert"
             >
-              {t(`errors.${remove.error.code}`)}
+              {t(`errors.${actionError.code}`)}
             </p>
           )}
         </>
@@ -170,6 +176,7 @@ export function SessionRow({ isActive, onSelect, session }: SessionRowProps) {
               disabled={pin.isPending}
               onClick={(event) => {
                 event.stopPropagation();
+                remove.reset();
                 pin.mutate({ pinned: !session.pinned, sessionId: session.id });
               }}
               size="icon-xs"

@@ -253,6 +253,80 @@ describe("useSessions streams", () => {
     expect(result.current.standard.sessions).toHaveLength(PAGE_SIZE * 2);
   });
 
+  it("does not interrupt an invalidated list refresh with pagination", async () => {
+    const result = await renderUseSessions();
+    const resolvers: PageResolver[] = [];
+    deferredList = (resolve) => {
+      resolvers.push(resolve);
+    };
+    const { result: renameResult } = renderHook(() => useRenameSession(), {
+      wrapper: Wrapper,
+    });
+
+    act(() =>
+      renameResult.current.mutate({ sessionId: "n19", title: "Renamed" }),
+    );
+    await waitFor(() => {
+      expect(result.current.standard.isFetching).toBe(true);
+      expect(resolvers).toHaveLength(2);
+    });
+    act(() => result.current.loadMore(false));
+
+    expect(resolvers).toHaveLength(2);
+  });
+
+  it("retains pagination when deletion empties the loaded pinned page", async () => {
+    sessions = makeSessions(true, 5);
+    const result = await renderUseSessions();
+    const { result: remove } = renderHook(() => useDeleteSession(), {
+      wrapper: Wrapper,
+    });
+    for (const id of ["p04", "p03", "p02", "p01"]) {
+      await act(async () => {
+        await remove.current.mutateAsync({ sessionId: id });
+      });
+    }
+    await waitFor(() => expect(result.current.pinned.sessions).toEqual([]));
+    expect(result.current.hasSessions).toBe(true);
+    act(() => result.current.loadMore(true));
+    await waitFor(() => {
+      expect(result.current.pinned.sessions.map((row) => row.id)).toEqual([
+        "p00",
+      ]);
+    });
+  });
+
+  it("does not restore a deleted row when an in-flight page resolves", async () => {
+    const result = await renderUseSessions();
+    let resolvePage: PageResolver | undefined;
+    deferredList = (resolve) => {
+      resolvePage = resolve;
+    };
+    const stalePage = listPage({
+      cursor: { id: "n16", updatedAt: SAME_TIMESTAMP },
+      pinned: false,
+    });
+    act(() => result.current.loadMore(false));
+    await waitFor(() => expect(resolvePage).toBeDefined());
+    const { result: remove } = renderHook(() => useDeleteSession(), {
+      wrapper: Wrapper,
+    });
+    await act(async () => {
+      await remove.current.mutateAsync({ sessionId: "n19" });
+    });
+    await act(async () => {
+      resolvePage?.(stalePage);
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(result.current.standard.sessions.map((row) => row.id)).toEqual([
+        "n18",
+        "n17",
+        "n16",
+      ]);
+    });
+  });
+
   it("does not report an empty library while the first page is loading", () => {
     sessions = [];
     let resolveFirst: PageResolver | undefined;

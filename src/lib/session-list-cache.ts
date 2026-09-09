@@ -13,76 +13,35 @@ export type SessionListData = InfiniteData<SessionPage, SessionPageParam>;
 export type SessionPageParam = null | SessionCursor;
 
 /**
- * Bumps one loaded row's updatedAt and moves it to the head of the first
- * page — the sidebar's activity ordering after an append. The append
- * timestamp is the session's new updatedAt: both are the write
- * transaction's single timestamp. Returns null when the row is not in the
- * loaded pages; the caller then falls back to invalidation.
+ * Inserts within the existing keyset boundaries without shifting their cursors.
+ * Returns null for absent caches, duplicates, or rows beyond the loaded range.
  */
-export function moveSessionToHead(
-  data: SessionListData | undefined,
-  sessionId: string,
-  updatedAt: string,
-): null | SessionListData {
-  if (!data || data.pages.length === 0) {
-    return null;
-  }
-  let moved: Session | undefined;
-  const stripped = data.pages.map((page) => {
-    const target = page.sessions.find((session) => session.id === sessionId);
-    if (target === undefined) {
-      return page;
-    }
-    moved = { ...target, updatedAt };
-    return {
-      ...page,
-      sessions: page.sessions.filter((session) => session.id !== sessionId),
-    };
-  });
-  if (moved === undefined) {
-    return null;
-  }
-  const first = stripped[0];
-  if (!first) {
-    return null;
-  }
-  const pages = [
-    { ...first, sessions: [moved, ...first.sessions] },
-    ...stripped.slice(1),
-  ];
-  return { pageParams: data.pageParams, pages };
-}
-
-/**
- * Prepends a freshly created session to the head of the standard list's
- * first page. The new session carries the newest updatedAt, so the head
- * position matches the keyset order and the page-boundary cursors stay
- * untouched. The first page may temporarily hold one row above the page
- * limit: a display-only tradeoff accepted over spilling into a new page,
- * which would have to invent a cursor. Returns null when the cache is
- * absent (never fabricate a list the UI has not loaded) or the row already
- * exists (duplicate delivery).
- */
-export function prependSessionToFirstPage(
+export function insertSessionInList(
   data: SessionListData | undefined,
   session: Session,
 ): null | SessionListData {
-  if (
-    !data ||
-    data.pages.length === 0 ||
-    containsSession(data.pages, session.id)
-  ) {
+  if (!data || containsSession(data.pages, session.id)) {
     return null;
   }
-  const first = data.pages[0];
-  if (!first) {
+  const index = data.pages.findIndex(
+    (page) =>
+      page.nextCursor === null ||
+      compareActivity(session, page.nextCursor) <= 0,
+  );
+  if (index < 0) {
     return null;
   }
-  const pages = [
-    { ...first, sessions: [session, ...first.sessions] },
-    ...data.pages.slice(1),
-  ];
-  return { pageParams: data.pageParams, pages };
+  return {
+    pageParams: data.pageParams,
+    pages: data.pages.map((page, pageIndex) =>
+      pageIndex === index
+        ? {
+            ...page,
+            sessions: [...page.sessions, session].sort(compareActivity),
+          }
+        : page,
+    ),
+  };
 }
 
 /**
@@ -106,6 +65,35 @@ export function removeSessionFromList(
     sessions: page.sessions.filter((session) => session.id !== sessionId),
   }));
   return { pageParams: data.pageParams, pages };
+}
+
+/** Updates a loaded row's activity and restores descending keyset order. */
+export function updateSessionActivity(
+  data: SessionListData | undefined,
+  sessionId: string,
+  updatedAt: string,
+): null | SessionListData {
+  const session = data?.pages
+    .flatMap((page) => page.sessions)
+    .find((row) => row.id === sessionId);
+  if (!data || !session) {
+    return null;
+  }
+  const next = removeSessionFromList(data, sessionId);
+  return next === null
+    ? null
+    : insertSessionInList(next, {
+        ...session,
+        updatedAt:
+          updatedAt > session.updatedAt ? updatedAt : session.updatedAt,
+      });
+}
+
+function compareActivity(a: SessionCursor, b: SessionCursor): number {
+  if (a.updatedAt !== b.updatedAt) {
+    return a.updatedAt > b.updatedAt ? -1 : 1;
+  }
+  return a.id === b.id ? 0 : a.id > b.id ? -1 : 1;
 }
 
 function containsSession(pages: SessionPage[], sessionId: string): boolean {

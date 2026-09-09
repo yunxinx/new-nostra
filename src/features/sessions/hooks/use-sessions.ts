@@ -1,7 +1,6 @@
 import {
   type InfiniteData,
   infiniteQueryOptions,
-  type QueryClient,
   useInfiniteQuery,
   type UseInfiniteQueryResult,
   useMutation,
@@ -11,6 +10,7 @@ import {
 } from "@tanstack/react-query";
 import { useRef } from "react";
 
+import type { SessionPageParam } from "@/lib/session-list-cache";
 import type { AppError, Session, SessionPage } from "@/types/ipc";
 
 import {
@@ -23,11 +23,7 @@ import {
   type SetSessionPinnedParams,
 } from "@/lib/ipc/sessions";
 import { messagesKeys, sessionsKeys } from "@/lib/query-keys";
-import {
-  removeSessionFromList,
-  type SessionListData,
-  type SessionPageParam,
-} from "@/lib/session-list-cache";
+import { updateSessionLists } from "@/lib/update-session-lists";
 import { useUiStore } from "@/stores/ui-store";
 
 /**
@@ -103,7 +99,10 @@ export function useDeleteSession() {
       // closes. A failed delete never reaches this point, so the row
       // recovers with nothing to undo here.
       await exitDelay(context.deleteStartedAt);
-      removeSessionRow(queryClient, variables.sessionId);
+      await updateSessionLists(queryClient, {
+        kind: "delete",
+        sessionId: variables.sessionId,
+      });
       // The delete already committed; a failed list read surfaces as the
       // sidebar streams' error state, not as a failed delete.
     },
@@ -130,7 +129,7 @@ export function useRenameSession() {
 export function useSessions(): SessionsResult {
   const pinnedQuery = useInfiniteQuery(sessionListOptions(true));
   const standardQuery = useInfiniteQuery(sessionListOptions(false));
-  // isFetchingNextPage only flips after an observer notification reaches
+  // isFetching only flips after an observer notification reaches
   // React; this flag closes the synchronous window between the fetch start
   // and that re-render so rapid scroll events cannot stack fetches.
   const pendingLoadMoreRef = useRef({ pinned: false, standard: false });
@@ -139,11 +138,11 @@ export function useSessions(): SessionsResult {
     const query = pinned ? pinnedQuery : standardQuery;
     const pending = pendingLoadMoreRef.current;
     const key = pinned ? "pinned" : "standard";
-    if (!query.hasNextPage || query.isFetchingNextPage || pending[key]) {
+    if (!query.hasNextPage || query.isFetching || pending[key]) {
       return;
     }
     pending[key] = true;
-    void query.fetchNextPage().finally(() => {
+    void query.fetchNextPage({ cancelRefetch: false }).finally(() => {
       pending[key] = false;
     });
   }
@@ -155,6 +154,8 @@ export function useSessions(): SessionsResult {
     hasSessions:
       pinned.sessions.length > 0 ||
       standard.sessions.length > 0 ||
+      pinned.hasNextPage ||
+      standard.hasNextPage ||
       pinned.isLoading ||
       standard.isLoading ||
       pinned.error !== null ||
@@ -189,19 +190,6 @@ function exitDelay(startedAt: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, remaining);
   });
-}
-
-function removeSessionRow(queryClient: QueryClient, sessionId: string): void {
-  for (const pinned of [false, true]) {
-    const key = sessionsKeys.list(pinned);
-    const next = removeSessionFromList(
-      queryClient.getQueryData<SessionListData>(key),
-      sessionId,
-    );
-    if (next !== null) {
-      queryClient.setQueryData(key, next);
-    }
-  }
 }
 
 function sessionListOptions(pinned: boolean) {
