@@ -4,6 +4,7 @@
 mod commands;
 mod db;
 mod error;
+mod provider;
 mod state;
 mod types;
 
