@@ -230,9 +230,6 @@ fn decode_provider(raw: RawProvider, models: Vec<RawModel>) -> Result<Provider, 
 /// Reads every provider with its models in stored order. A row whose columns
 /// no longer decode becomes a [`ProviderListItem::Corrupted`] placeholder instead
 /// of failing the whole read.
-// Reason: provider repository operations are called by the provider command
-// layer; revoke with their first production caller.
-#[allow(dead_code)]
 pub fn list(conn: &Connection) -> Result<Vec<ProviderListItem>, AppError> {
     let providers = read_provider_rows(conn)?;
     let mut models: HashMap<String, Vec<RawModel>> = HashMap::new();
@@ -256,9 +253,6 @@ pub fn list(conn: &Connection) -> Result<Vec<ProviderListItem>, AppError> {
 /// Inserts one provider row and its models in one transaction and returns it
 /// with the generated UUIDv7 id. A failure at any step, including commit, leaves
 /// neither table changed.
-// Reason: provider repository operations are called by the provider command
-// layer; revoke with their first production caller.
-#[allow(dead_code)]
 pub fn create(conn: &Connection, spec: &ProviderConfig) -> Result<Provider, AppError> {
     let tx = conn.unchecked_transaction()?;
     let now = entries::now_utc(&tx)?;
@@ -301,9 +295,6 @@ pub fn create(conn: &Connection, spec: &ProviderConfig) -> Result<Provider, AppE
 /// Replaces the stored provider with `spec` in one transaction: the model set
 /// is diffed (upserts plus explicit deletes), and dependents of a removed model
 /// disappear with it. An unknown id is `NotFound`.
-// Reason: provider repository operations are called by the provider command
-// layer; revoke with their first production caller.
-#[allow(dead_code)]
 pub fn update(conn: &Connection, id: &str, spec: &ProviderConfig) -> Result<Provider, AppError> {
     let tx = conn.unchecked_transaction()?;
     let exists: Option<bool> = tx
@@ -369,9 +360,6 @@ pub fn update(conn: &Connection, id: &str, spec: &ProviderConfig) -> Result<Prov
 
 /// Deletes a provider in one transaction, removing its dependent rows before
 /// the provider itself. An unknown id is `NotFound`.
-// Reason: provider repository operations are called by the provider command
-// layer; revoke with their first production caller.
-#[allow(dead_code)]
 pub fn delete(conn: &Connection, id: &str) -> Result<(), AppError> {
     let tx = conn.unchecked_transaction()?;
     let exists: Option<bool> = tx
@@ -395,9 +383,6 @@ pub fn delete(conn: &Connection, id: &str) -> Result<(), AppError> {
 /// Reads every aggregate with its members in `position` order. An aggregate
 /// holding a member whose model row is gone becomes a
 /// [`UnifiedModelListItem::Corrupted`] placeholder.
-// Reason: provider repository operations are called by the provider command
-// layer; revoke with their first production caller.
-#[allow(dead_code)]
 pub fn list_unified(conn: &Connection) -> Result<Vec<UnifiedModelListItem>, AppError> {
     let mut members: HashMap<String, (Vec<UnifiedMember>, bool)> = HashMap::new();
     {
@@ -449,9 +434,6 @@ pub fn list_unified(conn: &Connection) -> Result<Vec<UnifiedModelListItem>, AppE
 /// Inserts one aggregate and its members in one transaction, in draft order.
 /// A duplicate id trips the primary key; a member without a registered model
 /// trips the composite foreign key.
-// Reason: provider repository operations are called by the provider command
-// layer; revoke with their first production caller.
-#[allow(dead_code)]
 pub fn create_unified(conn: &Connection, spec: &UnifiedModel) -> Result<UnifiedModel, AppError> {
     let tx = conn.unchecked_transaction()?;
     tx.prepare_cached("INSERT INTO unified_models (id, hide) VALUES (?1, ?2)")?
@@ -463,9 +445,6 @@ pub fn create_unified(conn: &Connection, spec: &UnifiedModel) -> Result<UnifiedM
 
 /// Replaces the aggregate in one transaction; a changed `spec.id` renames it,
 /// and members are rewritten in draft order. An unknown id is `NotFound`.
-// Reason: provider repository operations are called by the provider command
-// layer; revoke with their first production caller.
-#[allow(dead_code)]
 pub fn update_unified(
     conn: &Connection,
     id: &str,
@@ -492,9 +471,6 @@ pub fn update_unified(
 
 /// Deletes one aggregate; its member rows go with it through the foreign key.
 /// An unknown id is `NotFound`.
-// Reason: provider repository operations are called by the provider command
-// layer; revoke with their first production caller.
-#[allow(dead_code)]
 pub fn delete_unified(conn: &Connection, id: &str) -> Result<(), AppError> {
     let removed =
         conn.prepare_cached("DELETE FROM unified_models WHERE id = ?1")?.execute(params![id])?;
@@ -509,9 +485,6 @@ pub fn delete_unified(conn: &Connection, id: &str) -> Result<(), AppError> {
 
 /// Returns the stored default as `(provider_id, model_id)`, or `None` while
 /// no default is set.
-// Reason: provider repository operations are called by the provider command
-// layer; revoke with their first production caller.
-#[allow(dead_code)]
 pub fn get_default_model(conn: &Connection) -> Result<Option<(String, String)>, AppError> {
     let row = conn
         .query_row(
@@ -526,9 +499,6 @@ pub fn get_default_model(conn: &Connection) -> Result<Option<(String, String)>, 
 /// Points the single default-model row at a model of that provider that has at
 /// least one protocol checked. An unknown provider is `NotFound`; an unknown or
 /// protocol-less model is `InvalidInput`.
-// Reason: provider repository operations are called by the provider command
-// layer; revoke with their first production caller.
-#[allow(dead_code)]
 pub fn set_default_model(
     conn: &Connection,
     provider_id: &str,
@@ -573,9 +543,6 @@ pub fn set_default_model(
 }
 
 /// Clears the default model; a no-op while none is set.
-// Reason: provider repository operations are called by the provider command
-// layer; revoke with their first production caller.
-#[allow(dead_code)]
 pub fn clear_default_model(conn: &Connection) -> Result<(), AppError> {
     conn.prepare_cached("DELETE FROM default_models WHERE singleton = 1")?.execute([])?;
     Ok(())

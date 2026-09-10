@@ -101,9 +101,6 @@ pub fn normalize_base_url(raw: &str) -> Result<String, AppError> {
 /// conflicts are checked by the command layer inside the write transaction.
 /// Base URLs are checked but not rewritten, so the caller stores the form
 /// `normalize_base_url` returns instead of the raw input.
-// Reason: provider draft validation is called by the provider command layer;
-// revoke with its first production caller.
-#[allow(dead_code)]
 pub fn validate_provider(config: &ProviderConfig) -> Result<(), AppError> {
     if config.name.trim().is_empty() {
         return Err(invalid("provider name must not be blank"));
@@ -168,9 +165,6 @@ pub fn validate_provider(config: &ProviderConfig) -> Result<(), AppError> {
 /// Validates a unified model draft: non-blank id, non-empty ordered members
 /// without duplicates. Whether each member pins a registered model is checked by
 /// the command layer inside the write transaction.
-// Reason: provider draft validation is called by the provider command layer;
-// revoke with its first production caller.
-#[allow(dead_code)]
 pub fn validate_unified_model(unified: &UnifiedModel) -> Result<(), AppError> {
     if unified.id.trim().is_empty() {
         return Err(invalid("unified model id must not be blank"));
@@ -510,8 +504,8 @@ fn merge_object(current: &mut Value, overlay: &Value) {
 /// matches (provider creation order). Members pinned to a disabled or unknown
 /// provider are skipped, so a unified model whose members are all unavailable
 /// resolves to nothing.
-// Reason: effective-value resolution is consumed by the provider command layer
-// and the request domain; revoke with its first production caller.
+// Reason: reference resolution is the request domain's addressing entry; revoke
+// with its first production caller.
 #[allow(dead_code)]
 pub fn resolve_model_reference(
     providers: &[Provider],

@@ -16,9 +16,6 @@ use crate::types::{
 
 /// One vendor: stable preset identity, form prefill values, detection knowledge
 /// and the compat specialisation both consumers share.
-// Reason: the preset projection feeds these fields into the preset DTO; revoke
-// with its first production reader.
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct VendorProfile {
     /// Stable slug; the preset DTO carries it.

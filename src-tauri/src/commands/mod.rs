@@ -1,6 +1,7 @@
 //! IPC boundary. `generate_handler!` below is the single command registry.
 
 mod entries;
+mod providers;
 mod sessions;
 
 use crate::error::{AppError, ErrorCode};
@@ -20,6 +21,17 @@ pub fn handler() -> impl Fn(Invoke) -> bool + Send + Sync + 'static {
         entries::load_active_path_after,
         entries::delete_entry,
         entries::set_active_leaf,
+        providers::list_providers,
+        providers::list_provider_presets,
+        providers::create_provider,
+        providers::update_provider,
+        providers::delete_provider,
+        providers::set_default_model,
+        providers::clear_default_model,
+        providers::list_unified_models,
+        providers::create_unified_model,
+        providers::update_unified_model,
+        providers::delete_unified_model,
     ]
 }
 
