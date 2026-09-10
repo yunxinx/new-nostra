@@ -1,6 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SquarePen } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { TitleBarControls } from "@/components/common/TitleBarControls";
@@ -12,22 +12,30 @@ import {
 } from "@/components/ui/tooltip";
 import { useTheme } from "@/features/appearance/use-theme";
 import { MessageList } from "@/features/chat/components/MessageList";
+import { ComposerFocusContext } from "@/features/chat/composer-focus-context";
 import { Sidebar } from "@/features/sessions/components/Sidebar";
 import { SidebarToggleButton } from "@/features/sessions/components/SidebarToggleButton";
-import { MOCK_SESSIONS } from "@/features/sessions/mock";
 import { useSidebarPersistence } from "@/features/sessions/use-sidebar-persistence";
+import { useSendMessage } from "@/hooks/use-send-message";
 import { useShortcuts } from "@/hooks/use-shortcuts";
-import { useUiStore } from "@/stores/ui-store";
+import { draftKeyFor, useUiStore } from "@/stores/ui-store";
 
 export function App() {
   const { t } = useTranslation();
   useTheme();
   useShortcuts();
   useSidebarPersistence();
-  const setActiveSession = useUiStore((s) => s.setActiveSession);
+  // The send orchestration lives in App's stable lifetime so submissions
+  // survive message-list remounts across session and draft switches.
+  const { send } = useSendMessage();
   const activeSessionId = useUiStore((s) => s.activeSessionId);
   const draftId = useUiStore((s) => s.draftId);
+  const composerKey = activeSessionId ?? draftKeyFor(draftId);
   const startNewChat = useUiStore((s) => s.startNewChat);
+  const [composerFocusKey, setComposerFocusKey] = useState<null | string>(null);
+  const cancelFocusTrackingRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => () => cancelFocusTrackingRef.current?.(), []);
 
   // The window is created hidden (geometry restores offscreen of view).
   // WebKit never schedules requestAnimationFrame while the host window is
@@ -42,55 +50,84 @@ export function App() {
       .then(() => void getCurrentWindow().setFocus());
   }, []);
 
-  // Mock deletion only hides rows locally and never persists; the session
-  // domain owns real deletion (persistence plus the confirm popover).
-  const [hiddenSessionIds, setHiddenSessionIds] = useState<ReadonlySet<string>>(
-    new Set(),
-  );
-
-  const sessions = MOCK_SESSIONS.filter(
-    (session) => !hiddenSessionIds.has(session.id),
-  );
-  const activeSession = sessions.find(
-    (session) => session.id === activeSessionId,
-  );
-
-  function handleDeleteSession(sessionId: string): void {
-    setHiddenSessionIds((prev) => {
-      const next = new Set(prev);
-      next.add(sessionId);
-      return next;
-    });
+  function handleSend(text: string): void {
+    const store = useUiStore.getState();
+    if (
+      text.trim().length === 0 ||
+      store.pendingSubmits.has(composerKey) ||
+      (activeSessionId !== null && store.pendingDeletes.has(activeSessionId))
+    ) {
+      return;
+    }
+    cancelFocusTrackingRef.current?.();
+    setComposerFocusKey(null);
+    const source = document.activeElement;
+    let shouldRestoreFocus = true;
+    function cancelFocus(): void {
+      shouldRestoreFocus = false;
+    }
+    function handleFocus(event: FocusEvent): void {
+      if (event.target !== source && event.target !== document.body) {
+        cancelFocus();
+      }
+    }
+    function stopTracking(): void {
+      document.removeEventListener("pointerdown", cancelFocus, true);
+      document.removeEventListener("focusin", handleFocus, true);
+      shouldRestoreFocus = false;
+    }
+    document.addEventListener("pointerdown", cancelFocus, true);
+    document.addEventListener("focusin", handleFocus, true);
+    cancelFocusTrackingRef.current = stopTracking;
+    send(
+      {
+        draftId,
+        draftKey: composerKey,
+        sessionId: activeSessionId,
+      },
+      text,
+      (sessionId) => {
+        const store = useUiStore.getState();
+        const canRestoreFocus =
+          shouldRestoreFocus &&
+          store.draftId === draftId &&
+          store.activeSessionId === sessionId &&
+          (document.activeElement === document.body ||
+            document.activeElement === source);
+        stopTracking();
+        if (canRestoreFocus) {
+          setComposerFocusKey(sessionId ?? draftKeyFor(draftId));
+        }
+      },
+    );
   }
 
   return (
     <div className="bg-background text-foreground flex h-screen overflow-hidden">
-      <Sidebar
-        onDeleteSession={handleDeleteSession}
-        onSelectSession={setActiveSession}
-        sessions={sessions}
-      />
+      <Sidebar />
       <main className="flex min-w-0 flex-1 flex-col">
         {/* Reserved title row: drag surface behind the fixed controls; the
             sidebar paints its own reserved row in sidebar tokens. */}
         <div className="h-[34px] shrink-0" data-tauri-drag-region />
         <section className="min-h-0 flex-1">
-          {activeSession ? (
+          {/* Selection identity is activeSessionId alone: a session stays
+              selected even when its sidebar page is evicted or the list
+              fails. A null selection is the new-chat draft; the draft key
+              change discards the previous draft's component state, while the
+              message window and drafts have their own owners. */}
+          <ComposerFocusContext
+            value={{
+              onFocusRestored: () => setComposerFocusKey(null),
+              shouldRestoreFocus: composerFocusKey === composerKey,
+            }}
+          >
             <MessageList
-              hasSessions={sessions.length > 0}
-              key={activeSession.id}
-              messages={activeSession.messages}
+              composerKey={composerKey}
+              key={composerKey}
+              onSend={handleSend}
+              sessionId={activeSessionId}
             />
-          ) : (
-            // A null selection is the new-chat state; with no sessions left
-            // the list shows the no-sessions empty state instead. The session
-            // domain replaces the data source without touching the components.
-            <MessageList
-              hasSessions={sessions.length > 0}
-              key={`draft-${String(draftId)}`}
-              messages={[]}
-            />
-          )}
+          </ComposerFocusContext>
         </section>
       </main>
       <TitleBarControls>

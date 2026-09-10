@@ -3,8 +3,6 @@ import { type PointerEvent, useEffect, useRef, useState } from "react";
 
 import { useUiStore } from "@/stores/ui-store";
 
-import type { MockSession } from "../mock";
-
 import { AccountBar } from "./AccountBar";
 import { SessionList } from "./SessionList";
 
@@ -14,20 +12,9 @@ interface ResizeStart {
   startX: number;
 }
 
-interface SidebarProps {
-  onDeleteSession: (sessionId: string) => void;
-  onSelectSession: (sessionId: string) => void;
-  sessions: readonly MockSession[];
-}
-
-export function Sidebar({
-  onDeleteSession,
-  onSelectSession,
-  sessions,
-}: SidebarProps) {
+export function Sidebar() {
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
-  const activeSessionId = useUiStore((s) => s.activeSessionId);
   const [isResizing, setIsResizing] = useState(false);
   const resizeStartRef = useRef<null | ResizeStart>(null);
 
@@ -102,14 +89,7 @@ export function Sidebar({
         {/* Reserved title row: the sidebar background extends behind the
             traffic lights through this spacer. */}
         <div className="h-[34px] shrink-0" data-tauri-drag-region />
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
-          <SessionList
-            activeSessionId={activeSessionId}
-            onDelete={onDeleteSession}
-            onSelect={onSelectSession}
-            sessions={sessions}
-          />
-        </div>
+        <SessionList />
         <AccountBar />
         {!sidebarCollapsed && (
           <div

@@ -12,14 +12,10 @@
   "ignore": ["src/components/ui/switch.tsx"],
   // 1. shadcn generator emits the full component variant set; trimming to
   //    only what is used would churn on every regeneration.
-  // 2. SessionGroupKey / MockMessage complete their modules' public surface
-  //    for the upcoming session-domain consumers.
   "ignoreIssues": {
     "src/components/ui/dropdown-menu.tsx": ["exports"],
     "src/components/ui/popover.tsx": ["exports"],
     "src/components/ui/select.tsx": ["exports"],
-    "src/features/sessions/grouping.ts": ["types"],
-    "src/features/sessions/mock.ts": ["types"],
   },
   "rules": {
     "files": "error",

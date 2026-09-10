@@ -15,6 +15,40 @@ interface ThemePalette {
   sidebarAccent: string;
 }
 
+// Reads the palette from the theme rules in the stylesheets rather than the
+// computed style of the document element: during a theme transition the
+// computed values are interpolating, and the derived surfaces must be
+// computed from the target theme's exact palette. Stylesheet reads do not
+// force a style recalc, so the class flip and the inline derived writes
+// stay in a single style-change event and transition together.
+export function applyDerivedTokens(): void {
+  const isDark = document.documentElement.classList.contains("dark");
+  const palette: ThemePalette = {
+    background: readToken("--background", isDark),
+    muted: readToken("--muted", isDark),
+    sidebar: readToken("--sidebar", isDark),
+    sidebarAccent: readToken("--sidebar-accent", isDark),
+  };
+  const derived = deriveTokens(palette, isDark);
+  const documentStyle = document.documentElement.style;
+  documentStyle.setProperty("--sidebar", derived.sidebar);
+  documentStyle.setProperty("--sidebar-accent", derived.sidebarAccent);
+  documentStyle.setProperty("--sidebar-selected", derived.sidebarSelected);
+  documentStyle.setProperty("--code-header", derived.codeHeader);
+}
+
+function* collectStyleRules(
+  rules: CSSRuleList,
+): Generator<CSSStyleRule, void, undefined> {
+  for (const rule of Array.from(rules)) {
+    if (rule instanceof CSSStyleRule) {
+      yield rule;
+    } else if ("cssRules" in rule) {
+      yield* collectStyleRules((rule as { cssRules: CSSRuleList }).cssRules);
+    }
+  }
+}
+
 // Each derived surface with its floor and reference surface. Inputs are the
 // palette's preferred values from index.css; the outputs replace them as
 // inline CSS variables at theme-apply time (the inline value is the only
@@ -57,38 +91,21 @@ function deriveTokens(palette: ThemePalette, isDark: boolean) {
   };
 }
 
-const DERIVED_PROPERTIES = [
-  "--code-header",
-  "--sidebar",
-  "--sidebar-accent",
-  "--sidebar-selected",
-] as const;
-
-// Reads the palette from the active theme's CSS variables and overrides the
-// derived tokens on the document element. Inline values written by a
-// previous application beat the stylesheet's theme-scoped values, so they
-// are cleared before reading; idempotent under repeated application.
-export function applyDerivedTokens(): void {
-  const documentStyle = document.documentElement.style;
-  for (const property of DERIVED_PROPERTIES) {
-    documentStyle.removeProperty(property);
+/** Reads a token from the `:root` (light) or `.dark` (dark) style rules. */
+function readToken(name: string, isDark: boolean): string {
+  const selector = isDark ? ".dark" : ":root";
+  for (const sheet of Array.from(document.styleSheets)) {
+    for (const rule of collectStyleRules(sheet.cssRules)) {
+      const selectors = rule.selectorText
+        .split(",")
+        .map((value) => value.trim());
+      if (selectors.includes(selector)) {
+        const value = rule.style.getPropertyValue(name);
+        if (value !== "") {
+          return value.trim();
+        }
+      }
+    }
   }
-  const palette: ThemePalette = {
-    background: readToken("--background"),
-    muted: readToken("--muted"),
-    sidebar: readToken("--sidebar"),
-    sidebarAccent: readToken("--sidebar-accent"),
-  };
-  const isDark = document.documentElement.classList.contains("dark");
-  const derived = deriveTokens(palette, isDark);
-  documentStyle.setProperty("--sidebar", derived.sidebar);
-  documentStyle.setProperty("--sidebar-accent", derived.sidebarAccent);
-  documentStyle.setProperty("--sidebar-selected", derived.sidebarSelected);
-  documentStyle.setProperty("--code-header", derived.codeHeader);
-}
-
-function readToken(name: string): string {
-  return getComputedStyle(document.documentElement)
-    .getPropertyValue(name)
-    .trim();
+  return "";
 }

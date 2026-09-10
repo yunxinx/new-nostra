@@ -182,6 +182,228 @@
   }
 }
 
+/* Theme-switch cross-fade. use-theme.ts adds .theme-transition to <html>
+   just before a dark-class flip and removes it once the colors settle. The
+   transition animates the theme's custom properties on the root itself:
+   every var() consumer — backgrounds, text, lucide icons via currentColor —
+   re-resolves each frame, so the whole page fades as one unit. Per-element
+   color transitions are deliberately not used: engines sequence a
+   transition of an inherited value after the parent's own transition ends,
+   which left inherited-color elements (icons) trailing the rest of the
+   page. Registration requires an initial-value; for --sidebar-selected and
+   --code-header the live value is always the inline one written by
+   applyDerivedTokens, so their initial values never render. The 250ms here
+   matches THEME_TRANSITION_MS in features/appearance/use-theme.ts. */
+@property --background {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #ffffff;
+}
+@property --border {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #e5e5e5;
+}
+@property --card {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #ffffff;
+}
+@property --card-foreground {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #0a0a0a;
+}
+@property --code-header {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #e5e5e5;
+}
+@property --popover {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #ffffff;
+}
+@property --popover-foreground {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #0a0a0a;
+}
+@property --primary {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #171717;
+}
+@property --primary-foreground {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #fafafa;
+}
+@property --secondary {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #e5e5e5;
+}
+@property --secondary-foreground {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #171717;
+}
+@property --muted {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #f5f5f5;
+}
+@property --muted-foreground {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #737373;
+}
+@property --accent {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #f5f5f5;
+}
+@property --accent-foreground {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #171717;
+}
+@property --destructive {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #ef4444;
+}
+@property --foreground {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #0a0a0a;
+}
+@property --input {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #e5e5e5;
+}
+@property --ring {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #a3a3a3;
+}
+@property --chart-1 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #171717;
+}
+@property --chart-2 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #404040;
+}
+@property --chart-3 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #525252;
+}
+@property --chart-4 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #737373;
+}
+@property --chart-5 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #a3a3a3;
+}
+@property --sidebar {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #fafafa;
+}
+@property --sidebar-foreground {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #0a0a0a;
+}
+@property --sidebar-primary {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #171717;
+}
+@property --sidebar-primary-foreground {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #fafafa;
+}
+@property --sidebar-accent {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #e5e5e5;
+}
+@property --sidebar-accent-foreground {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #171717;
+}
+@property --sidebar-border {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #e5e5e5;
+}
+@property --sidebar-ring {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #a3a3a3;
+}
+@property --sidebar-selected {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #e5e5e5;
+}
+@property --selection {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #55a0fc;
+}
+@property --scrollbar-thumb {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #a3a3a3e6;
+}
+@property --scrollbar-thumb-hover {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #a3a3a3;
+}
+html.theme-transition {
+  transition-property:
+    --background, --border, --card, --card-foreground, --code-header, --popover,
+    --popover-foreground, --primary, --primary-foreground, --secondary,
+    --secondary-foreground, --muted, --muted-foreground, --accent,
+    --accent-foreground, --destructive, --foreground, --input, --ring,
+    --chart-1, --chart-2, --chart-3, --chart-4, --chart-5, --sidebar,
+    --sidebar-foreground, --sidebar-primary, --sidebar-primary-foreground,
+    --sidebar-accent, --sidebar-accent-foreground, --sidebar-border,
+    --sidebar-ring, --sidebar-selected, --selection, --scrollbar-thumb,
+    --scrollbar-thumb-hover;
+  transition-duration: 250ms;
+  transition-timing-function: ease;
+}
+/* Descendant transitions must not run during the window: a per-frame
+   inherited color change retargets any element-level transition (buttons
+   ship transition-all), leaving that subtree — icons included — trailing
+   the tokens. With them suppressed, descendants inherit the interpolated
+   values instantly and the whole page moves as one unit. */
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  html.theme-transition {
+    transition-property: none;
+  }
+}
+
 /* Session-row surfaces and the title fade ramp are declared together so the
    ramp's solid zone always matches the row's current background exactly.
    The row (div role=button) carries the hover tint itself; selected rows
@@ -211,6 +433,54 @@
     var(--sidebar-selected) 40px,
     var(--sidebar-selected) 100%
   );
+}
+
+/* Row enter/exit animations. The 200ms here matches SESSION_ROW_ANIMATION_MS
+   in features/sessions/hooks/use-sessions.ts, which holds the deleted row in
+   the list caches until the exit finishes. The negative final
+   margin-bottom cancels the list's 4px row gap so the neighbors' slide
+   matches the height collapse and nothing snaps when the row unmounts.
+   The enter pair animates from the same collapsed state, so an inserted
+   row expands into place. The exit keeps pointer events off: a row being
+   deleted must not be operable again while it animates. */
+@keyframes session-row-enter {
+  from {
+    height: 0;
+    margin-bottom: -4px;
+    opacity: 0;
+  }
+  to {
+    height: 32px;
+    margin-bottom: 0;
+    opacity: 1;
+  }
+}
+@keyframes session-row-exit {
+  from {
+    height: 32px;
+    margin-bottom: 0;
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    margin-bottom: -4px;
+    opacity: 0;
+  }
+}
+.session-row-enter {
+  animation: session-row-enter 200ms ease-out;
+  overflow: hidden;
+}
+.session-row-exit {
+  animation: session-row-exit 200ms ease-in forwards;
+  overflow: hidden;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-row-enter,
+  .session-row-exit {
+    animation: none;
+  }
 }
 
 /* Assistant prose: 14px base with a 1.5/1.3/1.15 heading scale and a tight
