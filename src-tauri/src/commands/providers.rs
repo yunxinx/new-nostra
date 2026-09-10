@@ -5,6 +5,7 @@ use tauri::State;
 
 use crate::db::repo::providers::{ProviderListItem, UnifiedModelListItem};
 use crate::error::AppError;
+use crate::provider::config::ResolvedCompat;
 use crate::provider::vendors::VendorProfile;
 use crate::state::AppState;
 use crate::types::{
@@ -186,6 +187,11 @@ impl From<&VendorProfile> for ProviderPresetDto {
     }
 }
 
+/// Wire shape of the effective-value view: the merged compat values plus the
+/// layer that supplied each field. An alias rather than a mirrored struct
+/// because the resolution result already is that shape.
+pub type ResolvedCompatDto = ResolvedCompat;
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateProviderParams {
@@ -231,6 +237,16 @@ pub struct DeleteUnifiedModelParams {
     pub id: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveCompatParams {
+    pub provider: ProviderDraft,
+    /// Absent asks for the provider-level view, which stops before the model
+    /// compat layer.
+    pub model: Option<ModelEntry>,
+    pub protocol: Protocol,
+}
+
 /// Command bodies over a plain connection. The write paths check the stored
 /// provider set (name uniqueness, alias conflicts, unified-name collisions,
 /// member registration) inside the same connection guard as the write itself, so
@@ -245,7 +261,10 @@ mod operations {
 
     use crate::db::repo::providers;
     use crate::error::ErrorCode;
-    use crate::provider::config::{normalize_base_url, validate_provider, validate_unified_model};
+    use crate::provider::config::{
+        normalize_base_url, resolve_compat as resolve_effective_compat, validate_provider,
+        validate_unified_model,
+    };
     use crate::provider::vendors;
 
     use super::*;
@@ -297,6 +316,33 @@ mod operations {
 
     pub(super) fn clear_default_model(conn: &Connection) -> Result<(), AppError> {
         providers::clear_default_model(conn)
+    }
+
+    /// The GUI's effective-value view: a pure merge over the submitted draft, so
+    /// no stored state is read and no draft field is rejected — the panel shows
+    /// values for whatever the form currently holds.
+    pub(super) fn resolve_compat(
+        provider: &ProviderDraft,
+        model: Option<&ModelEntry>,
+        protocol: &Protocol,
+    ) -> ResolvedCompatDto {
+        let mut provider = provider.clone();
+        // The drafts arrive mid-edit: strip padding and trailing slashes from both
+        // URLs so host detection sees the hosts a save would store. An unparseable
+        // URL stays as submitted, leaving detection the request-name path instead
+        // of failing.
+        if let Ok(normalized) = normalize_base_url(&provider.base_url) {
+            provider.base_url = normalized;
+        }
+        let mut model = model.cloned();
+        if let Some(entry) = &mut model {
+            if let Some(url) = entry.base_url.as_deref() {
+                if let Ok(normalized) = normalize_base_url(url) {
+                    entry.base_url = Some(normalized);
+                }
+            }
+        }
+        resolve_effective_compat(&provider, model.as_ref(), protocol)
     }
 
     pub(super) fn list_unified_models(
@@ -592,6 +638,15 @@ pub async fn clear_default_model(state: State<'_, AppState>) -> Result<(), AppEr
     super::log_command_failures("clear_default_model", operations::clear_default_model(&conn))
 }
 
+// Reason: Tauri deserializes command arguments into owned values, so a borrowed
+// parameter cannot satisfy the command contract. Revoke if command arguments
+// ever gain a borrowed form.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn resolve_compat(params: ResolveCompatParams) -> Result<ResolvedCompatDto, AppError> {
+    Ok(operations::resolve_compat(&params.provider, params.model.as_ref(), &params.protocol))
+}
+
 #[tauri::command]
 pub async fn list_unified_models(
     state: State<'_, AppState>,
@@ -823,6 +878,31 @@ mod tests {
         assert_eq!(update.unified.id, "faster");
         assert!(update.unified.hide);
         assert_eq!(update.unified.members[0].provider_id, "p1");
+
+        let resolve: ResolveCompatParams = serde_json::from_value(json!({
+            "provider": {
+                "name": "Local",
+                "baseUrl": "https://api.example.com/v1",
+                "api": "openai-completions"
+            },
+            "protocol": "anthropic-messages"
+        }))
+        .unwrap();
+        assert_eq!(resolve.provider.name, "Local");
+        assert_eq!(resolve.protocol.as_str(), "anthropic-messages");
+        assert!(resolve.model.is_none(), "the model layer is optional");
+
+        let resolve: ResolveCompatParams = serde_json::from_value(json!({
+            "provider": {
+                "name": "Local",
+                "baseUrl": "https://api.example.com/v1",
+                "api": "openai-completions"
+            },
+            "model": { "id": "m1", "apis": ["openai-completions"] },
+            "protocol": "openai-completions"
+        }))
+        .unwrap();
+        assert_eq!(resolve.model.unwrap().id, "m1");
 
         let delete: DeleteProviderParams = serde_json::from_value(json!({ "id": "p1" })).unwrap();
         assert_eq!(delete.id, "p1");
@@ -1141,6 +1221,94 @@ mod tests {
 
         // No preset carries credentials: the form collects the key from the user.
         assert!(presets.iter().all(|preset| preset.get("apiKey").is_none()));
+    }
+
+    #[test]
+    fn resolve_compat_of_a_model_less_view_never_names_a_model_layer() {
+        let mut draft = provider("Panel", true, Vec::new());
+        draft.compat = Some(BTreeMap::from([(
+            Protocol::from("openai-completions"),
+            json!({ "supportsStore": false, "maxTokensField": null }),
+        )]));
+
+        let resolved =
+            operations::resolve_compat(&draft, None, &Protocol::from("openai-completions"));
+        let view = serde_json::to_value(&resolved).unwrap();
+        let values = view["values"].as_object().unwrap();
+        let sources = view["sources"].as_object().unwrap();
+
+        // `sources` covers exactly the keys `values` carries, each naming the
+        // layer that supplied it; a model-less view stops at the provider layer.
+        assert_eq!(sources.len(), values.len());
+        assert!(values.keys().all(|field| sources.contains_key(field)));
+        assert!(sources.values().all(|source| source != "model"));
+        assert_eq!(values["supportsStore"], json!(false));
+        assert_eq!(sources["supportsStore"], "provider");
+        // An explicit null never clears a lower layer: the family default stays.
+        assert_eq!(values["maxTokensField"], json!("max_completion_tokens"));
+        assert_eq!(sources["maxTokensField"], "familyDefault");
+    }
+
+    #[test]
+    fn resolve_compat_normalizes_a_draft_base_url_before_detection() {
+        let mut draft = provider("Panel", true, Vec::new());
+        // The field arrives mid-typing, padded and with stray trailing slashes. A
+        // model-less view leaves detection the host path alone, so only the
+        // normalized URL can select the vendor.
+        draft.base_url = "  https://api.deepseek.com///  ".into();
+
+        let resolved =
+            operations::resolve_compat(&draft, None, &Protocol::from("openai-completions"));
+        let view = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(view["values"]["supportsStore"], json!(false));
+        assert_eq!(view["sources"]["supportsStore"], "vendor");
+        assert_eq!(view["values"]["maxTokensField"], json!("max_tokens"));
+        assert_eq!(view["sources"]["maxTokensField"], "vendor");
+
+        // A model URL override replaces the provider URL, so detection must read
+        // the normalized override. The provider URL matches no vendor and the
+        // request name matches no model prefix, leaving the override the only
+        // reachable host.
+        let mut draft = provider("Panel", true, Vec::new());
+        draft.base_url = "https://gateway.example/v1".into();
+        let mut entry = model("m1");
+        entry.base_url = Some("  https://api.deepseek.com///  ".into());
+
+        let resolved =
+            operations::resolve_compat(&draft, Some(&entry), &Protocol::from("openai-completions"));
+        let view = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(view["values"]["supportsStore"], json!(false));
+        assert_eq!(view["sources"]["supportsStore"], "vendor");
+        assert_eq!(view["sources"]["thinkingFormat"], "vendor");
+    }
+
+    #[test]
+    fn resolve_compat_stacks_the_model_bucket_over_the_provider_bucket() {
+        let mut draft = provider("Local", true, Vec::new());
+        draft.compat = Some(BTreeMap::from([(
+            Protocol::from("openai-completions"),
+            json!({ "supportsStore": false, "requiresToolResultName": true }),
+        )]));
+        let mut entry = model("m1");
+        entry.compat = Some(BTreeMap::from([(
+            Protocol::from("openai-completions"),
+            json!({ "maxTokensField": "max_tokens" }),
+        )]));
+
+        let resolved =
+            operations::resolve_compat(&draft, Some(&entry), &Protocol::from("openai-completions"));
+        let view = serde_json::to_value(&resolved).unwrap();
+        let values = view["values"].as_object().unwrap();
+        let sources = view["sources"].as_object().unwrap();
+
+        assert_eq!(sources.len(), values.len());
+        assert_eq!(values["maxTokensField"], json!("max_tokens"));
+        assert_eq!(sources["maxTokensField"], "model");
+        // Fields the model bucket leaves alone keep the provider layer.
+        assert_eq!(values["supportsStore"], json!(false));
+        assert_eq!(sources["supportsStore"], "provider");
+        assert_eq!(values["requiresToolResultName"], json!(true));
+        assert_eq!(sources["requiresToolResultName"], "provider");
     }
 
     /// Captures whatever the `log` facade emits, so a test can pin both what the

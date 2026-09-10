@@ -9,6 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::error::{AppError, ErrorCode};
@@ -320,7 +321,8 @@ pub(crate) fn validate_compat_bucket(
 }
 
 /// Layer that supplied a compat field's effective value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum CompatSource {
     /// Family default of the protocol.
     FamilyDefault,
@@ -334,10 +336,7 @@ pub enum CompatSource {
 
 /// Effective compat of one protocol: the merged fields plus the layer that
 /// supplied each field. `sources` covers exactly the keys of `values`.
-// Reason: the provider command layer and the request domain read these fields;
-// revoke with their first production reader.
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ResolvedCompat {
     /// Merged fields with family defaults applied; empty nested objects are
     /// dropped because an empty object means unset downstream.
@@ -347,8 +346,8 @@ pub struct ResolvedCompat {
 }
 
 /// Effective values of one model under a selected protocol.
-// Reason: the provider command layer and the request domain read these fields;
-// revoke with their first production reader.
+// Reason: the request domain reads these fields for request encoding; revoke
+// with its first production reader.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ResolvedModel {
@@ -374,20 +373,16 @@ pub struct ResolvedModel {
 /// Resolves one model under a selected protocol. Vendor detection runs on the
 /// effective base URL, so a model that overrides the URL is matched against the
 /// host it actually talks to.
-// Reason: effective-value resolution is consumed by the provider command layer
-// and the request domain; revoke with its first production caller.
+// Reason: effective-value resolution is consumed by the request domain; revoke
+// with its first production caller.
 #[allow(dead_code)]
 pub fn resolve_model(
     provider: &ProviderConfig,
     model: &ModelEntry,
     protocol: &Protocol,
 ) -> ResolvedModel {
-    // A blank override counts as unset, matching validation.
-    let base_url = match model.base_url.as_deref() {
-        Some(url) if !url.trim().is_empty() => url.to_owned(),
-        _ => provider.base_url.clone(),
-    };
-    let vendor = vendors::detect_vendor(&base_url, &model.id);
+    let base_url = effective_base_url(provider, model);
+    let vendor = target_vendor(provider, Some(model));
     let mut headers = provider.headers.clone();
     if let Some(model_headers) = &model.headers {
         for (name, value) in model_headers {
@@ -395,7 +390,7 @@ pub fn resolve_model(
         }
     }
     ResolvedModel {
-        compat: resolve_compat(provider, model, protocol, vendor),
+        compat: resolve_compat(provider, Some(model), protocol),
         base_url,
         name: match model.name.as_deref() {
             Some(name) if !name.trim().is_empty() => name.to_owned(),
@@ -416,16 +411,38 @@ pub fn resolve_model(
     }
 }
 
-/// Four-layer merge for one protocol: family defaults, the detected vendor's
-/// specialisation, the provider bucket, then the model bucket. Scalars overwrite
-/// and nested objects merge key by key, so a later layer keeps the keys only an
-/// earlier layer set.
-fn resolve_compat(
+/// Effective base URL of a request target: a non-blank model override wins over
+/// the provider URL. A blank override counts as unset, matching validation.
+fn effective_base_url(provider: &ProviderConfig, model: &ModelEntry) -> String {
+    match model.base_url.as_deref() {
+        Some(url) if !url.trim().is_empty() => url.to_owned(),
+        _ => provider.base_url.clone(),
+    }
+}
+
+/// Vendor of a request target: the host of the effective base URL wins, the
+/// request name decides only when the host matches nothing. A model-less target
+/// has no request name, so only a host can select a vendor.
+fn target_vendor(
     provider: &ProviderConfig,
-    model: &ModelEntry,
+    model: Option<&ModelEntry>,
+) -> Option<&'static VendorProfile> {
+    match model {
+        Some(model) => vendors::detect_vendor(&effective_base_url(provider, model), &model.id),
+        None => vendors::detect_vendor(&provider.base_url, ""),
+    }
+}
+
+/// Merges the compat layers of one protocol: family defaults, the detected
+/// vendor's specialisation, the provider bucket, then the model bucket when a
+/// model is given (a model-less target is the provider-level view). Scalars
+/// overwrite, nested objects merge key by key.
+pub fn resolve_compat(
+    provider: &ProviderConfig,
+    model: Option<&ModelEntry>,
     protocol: &Protocol,
-    vendor: Option<&'static VendorProfile>,
 ) -> ResolvedCompat {
+    let vendor = target_vendor(provider, model);
     // An unknown family resolves from the stored layers alone; validation keeps
     // such names out of stored configurations.
     let mut values = match compat_defaults::family_defaults(protocol) {
@@ -434,13 +451,15 @@ fn resolve_compat(
     };
     let mut sources: BTreeMap<String, CompatSource> =
         values.keys().map(|field| (field.clone(), CompatSource::FamilyDefault)).collect();
+    let model_bucket =
+        model.and_then(|model| model.compat.as_ref()).and_then(|buckets| buckets.get(protocol));
     let layers = [
         (CompatSource::Vendor, vendor.and_then(|profile| profile.compat.get(protocol))),
         (
             CompatSource::Provider,
             provider.compat.as_ref().and_then(|buckets| buckets.get(protocol)),
         ),
-        (CompatSource::Model, model.compat.as_ref().and_then(|buckets| buckets.get(protocol))),
+        (CompatSource::Model, model_bucket),
     ];
     for (source, fragment) in layers {
         if let Some(fragment) = fragment {

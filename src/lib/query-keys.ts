@@ -14,3 +14,11 @@ export const sessionsKeys = {
 export const messagesKeys = {
   bySession: (sessionId: string) => ["messages", sessionId] as const,
 };
+
+export const providersKeys = {
+  all: ["providers"] as const,
+};
+
+export const unifiedModelsKeys = {
+  all: ["unifiedModels"] as const,
+};
