@@ -51,7 +51,7 @@ pub fn vendors() -> &'static [VendorProfile] {
 pub fn detect_vendor(base_url: &str, model_id: &str) -> Option<&'static VendorProfile> {
     if let Some(host) = crate::provider::config::url_host(base_url) {
         let by_host = vendors().iter().find(|vendor| {
-            vendor.host_suffixes.iter().any(|suffix| host_suffix_matches(host, suffix))
+            vendor.host_suffixes.iter().any(|suffix| host_suffix_matches(&host, suffix))
         });
         if by_host.is_some() {
             return by_host;
@@ -67,8 +67,12 @@ pub fn detect_vendor(base_url: &str, model_id: &str) -> Option<&'static VendorPr
 /// name the default port of an OpenAI-compatible local server rather than a
 /// strict port requirement.
 fn host_suffix_matches(host: &str, suffix: &str) -> bool {
-    let host = crate::provider::config::strip_port(host).to_ascii_lowercase();
-    let suffix = crate::provider::config::strip_port(suffix).to_ascii_lowercase();
+    let Some(host) = crate::provider::config::url_host(&format!("http://{host}")) else {
+        return false;
+    };
+    let Some(suffix) = crate::provider::config::url_host(&format!("http://{suffix}")) else {
+        return false;
+    };
     host == suffix || host.ends_with(&format!(".{suffix}"))
 }
 
@@ -125,7 +129,6 @@ fn openai() -> VendorProfile {
                 id: "gpt-6-astra".into(),
                 name: Some("GPT-6 Astra".into()),
                 apis: vec![Protocol::from(OPENAI_RESPONSES)],
-                aliases: vec!["astra".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -148,7 +151,6 @@ fn openai() -> VendorProfile {
                 id: "gpt-5.6-sol".into(),
                 name: Some("GPT-5.6 Sol".into()),
                 apis: vec![Protocol::from(OPENAI_RESPONSES)],
-                aliases: vec!["sol".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -171,7 +173,6 @@ fn openai() -> VendorProfile {
                 id: "gpt-5.6-terra".into(),
                 name: Some("GPT-5.6 Terra".into()),
                 apis: vec![Protocol::from(OPENAI_RESPONSES)],
-                aliases: vec!["terra".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -194,7 +195,6 @@ fn openai() -> VendorProfile {
                 id: "gpt-5.6-luna".into(),
                 name: Some("GPT-5.6 Luna".into()),
                 apis: vec![Protocol::from(OPENAI_RESPONSES)],
-                aliases: vec!["luna".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -236,7 +236,6 @@ fn anthropic() -> VendorProfile {
                 id: "claude-fable-5-1".into(),
                 name: Some("Claude Fable 5.1".into()),
                 apis: vec![Protocol::from(ANTHROPIC_MESSAGES)],
-                aliases: vec!["fable".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -252,7 +251,6 @@ fn anthropic() -> VendorProfile {
                 id: "claude-opus-5".into(),
                 name: Some("Claude Opus 5".into()),
                 apis: vec![Protocol::from(ANTHROPIC_MESSAGES)],
-                aliases: vec!["opus".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -268,7 +266,6 @@ fn anthropic() -> VendorProfile {
                 id: "claude-sonnet-5".into(),
                 name: Some("Claude Sonnet 5".into()),
                 apis: vec![Protocol::from(ANTHROPIC_MESSAGES)],
-                aliases: vec!["sonnet".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -284,7 +281,6 @@ fn anthropic() -> VendorProfile {
                 id: "claude-haiku-4-5".into(),
                 name: Some("Claude Haiku 4.5".into()),
                 apis: vec![Protocol::from(ANTHROPIC_MESSAGES)],
-                aliases: vec!["haiku".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -329,7 +325,6 @@ fn deepseek() -> VendorProfile {
                 id: "deepseek-flash".into(),
                 name: Some("DeepSeek Flash".into()),
                 apis: vec![Protocol::from(OPENAI_COMPLETIONS)],
-                aliases: vec!["flash".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -352,7 +347,6 @@ fn deepseek() -> VendorProfile {
                 id: "deepseek-v4-pro".into(),
                 name: Some("DeepSeek V4 Pro".into()),
                 apis: vec![Protocol::from(OPENAI_COMPLETIONS)],
-                aliases: vec!["pro".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -405,7 +399,6 @@ fn openrouter() -> VendorProfile {
                 id: "anthropic/claude-sonnet-5".into(),
                 name: Some("Claude Sonnet 5".into()),
                 apis: vec![Protocol::from(ANTHROPIC_MESSAGES), Protocol::from(OPENAI_COMPLETIONS)],
-                aliases: vec!["sonnet-5".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -427,7 +420,6 @@ fn openrouter() -> VendorProfile {
                 name: Some("GPT-6 Astra".into()),
                 apis: vec![Protocol::from(OPENAI_COMPLETIONS)],
                 // No `astra` alias: the direct OpenAI entry already claims it.
-                aliases: vec![],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -455,7 +447,6 @@ fn openrouter() -> VendorProfile {
                 id: "google/gemini-3.8-flash".into(),
                 name: Some("Gemini 3.8 Flash".into()),
                 apis: vec![Protocol::from(OPENAI_COMPLETIONS)],
-                aliases: vec!["gemini-flash".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -471,7 +462,6 @@ fn openrouter() -> VendorProfile {
                 id: "moonshotai/kimi-k3".into(),
                 name: Some("Kimi K3".into()),
                 apis: vec![Protocol::from(OPENAI_COMPLETIONS)],
-                aliases: vec!["kimi-k3".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -513,7 +503,6 @@ fn moonshot() -> VendorProfile {
                 id: "kimi-k3".into(),
                 name: Some("Kimi K3".into()),
                 apis: vec![Protocol::from(OPENAI_COMPLETIONS)],
-                aliases: vec!["k3".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -529,7 +518,6 @@ fn moonshot() -> VendorProfile {
                 id: "kimi-k2.7-code".into(),
                 name: Some("Kimi K2.7 Code".into()),
                 apis: vec![Protocol::from(OPENAI_COMPLETIONS)],
-                aliases: vec!["kimi-code".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -545,7 +533,6 @@ fn moonshot() -> VendorProfile {
                 id: "kimi-k2.6".into(),
                 name: Some("Kimi K2.6".into()),
                 apis: vec![Protocol::from(OPENAI_COMPLETIONS)],
-                aliases: vec!["k2.6".into()],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -587,7 +574,6 @@ fn ollama() -> VendorProfile {
                 id: "gpt-oss:20b".into(),
                 name: Some("gpt-oss 20B".into()),
                 apis: vec![Protocol::from(OPENAI_COMPLETIONS)],
-                aliases: vec![],
                 base_url: None,
                 reasoning: true,
                 thinking_level_map: None,
@@ -603,7 +589,6 @@ fn ollama() -> VendorProfile {
                 id: "gemma4:12b".into(),
                 name: Some("Gemma 4 12B".into()),
                 apis: vec![Protocol::from(OPENAI_COMPLETIONS)],
-                aliases: vec![],
                 base_url: None,
                 // The library page does not state whether the tag reasons.
                 reasoning: false,
@@ -621,7 +606,6 @@ fn ollama() -> VendorProfile {
                 id: "qwen3.5".into(),
                 name: Some("Qwen3.5".into()),
                 apis: vec![Protocol::from(OPENAI_COMPLETIONS)],
-                aliases: vec![],
                 base_url: None,
                 // The library page does not state whether the tag reasons.
                 reasoning: false,
@@ -691,7 +675,6 @@ mod tests {
                     "{} does not accept text",
                     model.id
                 );
-                assert!(model.aliases.iter().all(|alias| alias != &model.id));
                 assert!(model.cost.is_some(), "{} has no cost", model.id);
                 assert!(model.context_window.is_some(), "{} has no context window", model.id);
             }
@@ -716,22 +699,6 @@ mod tests {
             let profile = vendor(preset_id);
             assert_eq!(profile.base_url, base_url);
             assert_eq!(profile.api, Protocol::from(api));
-        }
-    }
-
-    #[test]
-    fn catalog_aliases_are_distinct_across_vendors() {
-        // Aliases of enabled providers may not collide at save time, so the
-        // presets must be usable together.
-        let mut seen = BTreeMap::new();
-        for profile in vendors() {
-            for model in &profile.models {
-                for alias in &model.aliases {
-                    if let Some(owner) = seen.insert(alias.as_str(), profile.preset_id) {
-                        panic!("alias {alias} claimed by {owner} and {}", profile.preset_id);
-                    }
-                }
-            }
         }
     }
 

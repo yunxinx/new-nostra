@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::db::repo::providers::{ProviderListItem, UnifiedModelListItem};
 use crate::error::AppError;
@@ -102,37 +102,26 @@ impl From<ProviderListItem> for ProviderListItemDto {
     }
 }
 
-/// Wire shape of the single default-model reference: a model of a provider.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DefaultModelDto {
-    pub provider_id: String,
-    pub model_id: String,
-}
-
-/// Payload of `list_providers`: every stored provider in creation order plus the
-/// default-model reference (`null` while none is set).
+/// Payload of `list_providers`: every stored provider in creation order.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProvidersDto {
     pub providers: Vec<ProviderListItemDto>,
-    pub default_model: Option<DefaultModelDto>,
 }
 
-/// Wire shape of one unified model: visible name, hide switch, members in
-/// attempt order.
+/// Wire shape of one unified model: independent name and ordered members.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UnifiedModelDto {
     pub id: String,
-    pub hide: bool,
+
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<UnifiedMember>,
 }
 
 impl From<UnifiedModel> for UnifiedModelDto {
     fn from(unified: UnifiedModel) -> Self {
-        UnifiedModelDto { id: unified.id, hide: unified.hide, members: unified.members }
+        UnifiedModelDto { id: unified.id, members: unified.members }
     }
 }
 
@@ -213,13 +202,6 @@ pub struct DeleteProviderParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SetDefaultModelParams {
-    pub provider_id: String,
-    pub model_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct CreateUnifiedModelParams {
     pub unified: UnifiedModelDraft,
 }
@@ -248,15 +230,12 @@ pub struct ResolveCompatParams {
 }
 
 /// Command bodies over a plain connection. The write paths check the stored
-/// provider set (name uniqueness, alias conflicts, unified-name collisions,
-/// member registration) inside the same connection guard as the write itself, so
+/// provider set (name uniqueness, member registration)
+/// inside the same connection guard as the write itself, so
 /// no other writer can slip between check and write; keeping them out of the
 /// `#[tauri::command]` wrappers lets tests exercise a rejected write against a
 /// real stored state.
 mod operations {
-    use std::collections::btree_map::Entry;
-    use std::collections::BTreeSet;
-
     use rusqlite::Connection;
 
     use crate::db::repo::providers;
@@ -274,11 +253,7 @@ mod operations {
     }
 
     pub(super) fn list_providers(conn: &Connection) -> Result<ProvidersDto, AppError> {
-        Ok(ProvidersDto {
-            providers: providers::list(conn)?.into_iter().map(Into::into).collect(),
-            default_model: providers::get_default_model(conn)?
-                .map(|(provider_id, model_id)| DefaultModelDto { provider_id, model_id }),
-        })
+        Ok(ProvidersDto { providers: providers::list(conn)?.into_iter().map(Into::into).collect() })
     }
 
     pub(super) fn list_provider_presets() -> Vec<ProviderPresetDto> {
@@ -304,18 +279,6 @@ mod operations {
 
     pub(super) fn delete_provider(conn: &Connection, id: &str) -> Result<(), AppError> {
         providers::delete(conn, id)
-    }
-
-    pub(super) fn set_default_model(
-        conn: &Connection,
-        provider_id: &str,
-        model_id: &str,
-    ) -> Result<(), AppError> {
-        providers::set_default_model(conn, provider_id, model_id)
-    }
-
-    pub(super) fn clear_default_model(conn: &Connection) -> Result<(), AppError> {
-        providers::clear_default_model(conn)
     }
 
     /// The GUI's effective-value view: a pure merge over the submitted draft, so
@@ -359,7 +322,6 @@ mod operations {
         let (stored, unified) = read_write_state(conn)?;
         ensure_members_registered(&stored, draft)?;
         ensure_unified_id_free(&unified, &draft.id, None)?;
-        ensure_unified_name_registered_free(&stored, draft)?;
         providers::create_unified(conn, draft).map(Into::into)
     }
 
@@ -372,7 +334,6 @@ mod operations {
         let (stored, unified) = read_write_state(conn)?;
         ensure_members_registered(&stored, draft)?;
         ensure_unified_id_free(&unified, &draft.id, Some(id))?;
-        ensure_unified_name_registered_free(&stored, draft)?;
         providers::update_unified(conn, id, draft).map(Into::into)
     }
 
@@ -399,10 +360,8 @@ mod operations {
         }
         validate_provider(&spec)?;
 
-        let (stored, unified) = read_write_state(conn)?;
+        let (stored, _) = read_write_state(conn)?;
         ensure_provider_name_free(&stored, &spec.name, replaced_id)?;
-        ensure_aliases_unambiguous(&stored, &spec, replaced_id)?;
-        ensure_unified_names_free(&unified, &spec)?;
         Ok(spec)
     }
 
@@ -440,99 +399,6 @@ mod operations {
         });
         if taken {
             return Err(invalid(format!("provider name `{name}` is already taken")));
-        }
-        Ok(())
-    }
-
-    /// Alias keys are downstream reference names: across the enabled providers one
-    /// key may point at one upstream model id, so a second target is refused with a
-    /// pointer at unified models, the shape made for one-to-many names. Disabled
-    /// providers take part in no check, and the row being replaced is not a second
-    /// owner of its own aliases. Aliases compare trimmed, the form the draft
-    /// validator deduplicates them in.
-    fn ensure_aliases_unambiguous(
-        stored: &[Provider],
-        draft: &ProviderConfig,
-        replaced_id: Option<&str>,
-    ) -> Result<(), AppError> {
-        let mut configs: Vec<&ProviderConfig> = stored
-            .iter()
-            .filter(|provider| provider.config.enabled && Some(provider.id.as_str()) != replaced_id)
-            .map(|provider| &provider.config)
-            .collect();
-        if draft.enabled {
-            configs.push(draft);
-        }
-
-        let mut targets: BTreeMap<&str, &str> = BTreeMap::new();
-        for config in configs {
-            for model in &config.models {
-                for alias in &model.aliases {
-                    match targets.entry(alias.trim()) {
-                        Entry::Vacant(slot) => {
-                            slot.insert(model.id.as_str());
-                        }
-                        Entry::Occupied(slot) if *slot.get() != model.id => {
-                            return Err(invalid(format!(
-                                "alias `{}` points at both `{}` and `{}`; a name spanning models \
-                                 belongs to a unified model",
-                                alias.trim(),
-                                slot.get(),
-                                model.id
-                            )));
-                        }
-                        Entry::Occupied(_) => {}
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// An unhidden unified model owns its name: no model id or alias of the saved
-    /// provider may equal it. Hiding the aggregate is the way to take the name
-    /// over for provider models.
-    fn ensure_unified_names_free(
-        unified: &[UnifiedModel],
-        spec: &ProviderConfig,
-    ) -> Result<(), AppError> {
-        let owned: BTreeSet<&str> =
-            unified.iter().filter(|model| !model.hide).map(|model| model.id.as_str()).collect();
-        for model in &spec.models {
-            let names = std::iter::once(model.id.as_str())
-                .chain(model.aliases.iter().map(|alias| alias.trim()));
-            for name in names {
-                if owned.contains(name) {
-                    return Err(invalid(format!(
-                        "`{name}` names an unhidden unified model; hide that model to use the \
-                         name for a provider model"
-                    )));
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// The mirror of [`ensure_unified_names_free`]: an unhidden aggregate may not
-    /// take a name any provider has registered as a model id or alias.
-    fn ensure_unified_name_registered_free(
-        stored: &[Provider],
-        draft: &UnifiedModel,
-    ) -> Result<(), AppError> {
-        if draft.hide {
-            return Ok(());
-        }
-        for provider in stored {
-            for model in &provider.config.models {
-                let registered = model.id == draft.id
-                    || model.aliases.iter().any(|alias| alias.trim() == draft.id);
-                if registered {
-                    return Err(invalid(format!(
-                        "`{}` is a registered model name; hide the unified model to take it over",
-                        draft.id
-                    )));
-                }
-            }
         }
         Ok(())
     }
@@ -576,6 +442,19 @@ mod operations {
     }
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderCatalogChanged {
+    scope: &'static str,
+}
+
+fn notify_catalog_change(app: &AppHandle) {
+    if let Err(error) = app.emit("providers://changed", ProviderCatalogChanged { scope: "catalog" })
+    {
+        log::error!("catalog change notification failed: {error}");
+    }
+}
+
 #[tauri::command]
 pub async fn list_providers(state: State<'_, AppState>) -> Result<ProvidersDto, AppError> {
     let conn = state.db.lock().await;
@@ -589,53 +468,56 @@ pub fn list_provider_presets() -> Result<Vec<ProviderPresetDto>, AppError> {
 
 #[tauri::command]
 pub async fn create_provider(
+    app: AppHandle,
     state: State<'_, AppState>,
     params: CreateProviderParams,
 ) -> Result<ProviderDto, AppError> {
     let conn = state.db.lock().await;
-    super::log_command_failures(
+    let result = super::log_command_failures(
         "create_provider",
         operations::create_provider(&conn, &params.provider),
-    )
+    );
+    drop(conn);
+    if result.is_ok() {
+        notify_catalog_change(&app);
+    }
+    result
 }
 
 #[tauri::command]
 pub async fn update_provider(
+    app: AppHandle,
     state: State<'_, AppState>,
     params: UpdateProviderParams,
 ) -> Result<ProviderDto, AppError> {
     let conn = state.db.lock().await;
-    super::log_command_failures(
+    let result = super::log_command_failures(
         "update_provider",
         operations::update_provider(&conn, &params.id, &params.provider),
-    )
+    );
+    drop(conn);
+    if result.is_ok() {
+        notify_catalog_change(&app);
+    }
+    result
 }
 
 #[tauri::command]
 pub async fn delete_provider(
+    app: AppHandle,
     state: State<'_, AppState>,
     params: DeleteProviderParams,
 ) -> Result<(), AppError> {
     let conn = state.db.lock().await;
-    super::log_command_failures("delete_provider", operations::delete_provider(&conn, &params.id))
-}
-
-#[tauri::command]
-pub async fn set_default_model(
-    state: State<'_, AppState>,
-    params: SetDefaultModelParams,
-) -> Result<(), AppError> {
-    let conn = state.db.lock().await;
-    super::log_command_failures(
-        "set_default_model",
-        operations::set_default_model(&conn, &params.provider_id, &params.model_id),
-    )
-}
-
-#[tauri::command]
-pub async fn clear_default_model(state: State<'_, AppState>) -> Result<(), AppError> {
-    let conn = state.db.lock().await;
-    super::log_command_failures("clear_default_model", operations::clear_default_model(&conn))
+    let result = super::log_command_failures(
+        "delete_provider",
+        operations::delete_provider(&conn, &params.id),
+    );
+    drop(conn);
+    if result.is_ok() {
+        notify_catalog_change(&app);
+    }
+    result
 }
 
 // Reason: Tauri deserializes command arguments into owned values, so a borrowed
@@ -657,38 +539,56 @@ pub async fn list_unified_models(
 
 #[tauri::command]
 pub async fn create_unified_model(
+    app: AppHandle,
     state: State<'_, AppState>,
     params: CreateUnifiedModelParams,
 ) -> Result<UnifiedModelDto, AppError> {
     let conn = state.db.lock().await;
-    super::log_command_failures(
+    let result = super::log_command_failures(
         "create_unified_model",
         operations::create_unified_model(&conn, &params.unified),
-    )
+    );
+    drop(conn);
+    if result.is_ok() {
+        notify_catalog_change(&app);
+    }
+    result
 }
 
 #[tauri::command]
 pub async fn update_unified_model(
+    app: AppHandle,
     state: State<'_, AppState>,
     params: UpdateUnifiedModelParams,
 ) -> Result<UnifiedModelDto, AppError> {
     let conn = state.db.lock().await;
-    super::log_command_failures(
+    let result = super::log_command_failures(
         "update_unified_model",
         operations::update_unified_model(&conn, &params.id, &params.unified),
-    )
+    );
+    drop(conn);
+    if result.is_ok() {
+        notify_catalog_change(&app);
+    }
+    result
 }
 
 #[tauri::command]
 pub async fn delete_unified_model(
+    app: AppHandle,
     state: State<'_, AppState>,
     params: DeleteUnifiedModelParams,
 ) -> Result<(), AppError> {
     let conn = state.db.lock().await;
-    super::log_command_failures(
+    let result = super::log_command_failures(
         "delete_unified_model",
         operations::delete_unified_model(&conn, &params.id),
-    )
+    );
+    drop(conn);
+    if result.is_ok() {
+        notify_catalog_change(&app);
+    }
+    result
 }
 
 #[cfg(test)]
@@ -717,7 +617,6 @@ mod tests {
             id: id.into(),
             name: None,
             apis: vec![Protocol::from("openai-completions")],
-            aliases: Vec::new(),
             base_url: None,
             reasoning: false,
             thinking_level_map: None,
@@ -729,10 +628,6 @@ mod tests {
             headers: None,
             compat: None,
         }
-    }
-
-    fn aliased(entry: ModelEntry, aliases: &[&str]) -> ModelEntry {
-        ModelEntry { aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(), ..entry }
     }
 
     fn provider(name: &str, enabled: bool, models: Vec<ModelEntry>) -> ProviderConfig {
@@ -769,10 +664,8 @@ mod tests {
 
     #[test]
     fn provider_dto_pins_the_domain_wire_shape() {
-        let stored = Provider {
-            id: "p1".into(),
-            config: provider("Primary", true, vec![aliased(model("gpt-5"), &["gpt"])]),
-        };
+        let stored =
+            Provider { id: "p1".into(), config: provider("Primary", true, vec![model("gpt-5")]) };
         let dto = serde_json::to_value(ProviderDto::from(stored.clone())).unwrap();
         assert_eq!(dto, serde_json::to_value(&stored).unwrap());
 
@@ -785,14 +678,13 @@ mod tests {
         assert_eq!(dto["abortOnDisconnect"], true);
         assert_eq!(dto["reasoningOutput"], "auto");
         assert_eq!(dto["models"][0]["apis"], json!(["openai-completions"]));
-        assert_eq!(dto["models"][0]["aliases"], json!(["gpt"]));
         // An unset optional field stays absent rather than becoming null.
         assert!(dto.get("compat").is_none());
         assert!(dto["models"][0].get("cost").is_none());
 
         let unified = UnifiedModel {
             id: "fast".into(),
-            hide: true,
+
             members: vec![UnifiedMember { provider_id: "p1".into(), model: "gpt-5".into() }],
         };
         assert_eq!(
@@ -854,29 +746,24 @@ mod tests {
         assert!(update.provider.models.is_empty());
         assert_eq!(update.provider.api_key.expose(), "");
 
-        let default: SetDefaultModelParams =
-            serde_json::from_value(json!({ "providerId": "p1", "modelId": "m1" })).unwrap();
-        assert_eq!(default.provider_id, "p1");
-        assert_eq!(default.model_id, "m1");
-
         let create: CreateUnifiedModelParams = serde_json::from_value(json!({
             "unified": { "id": "fast", "members": [{ "providerId": "p1", "model": "m1" }] }
         }))
         .unwrap();
-        assert!(!create.unified.hide);
+        assert_eq!(create.unified.id, "fast");
 
         let update: UpdateUnifiedModelParams = serde_json::from_value(json!({
             "id": "fast",
             "unified": {
                 "id": "faster",
-                "hide": true,
+
                 "members": [{ "providerId": "p1", "model": "m1" }]
             }
         }))
         .unwrap();
         assert_eq!(update.id, "fast");
         assert_eq!(update.unified.id, "faster");
-        assert!(update.unified.hide);
+
         assert_eq!(update.unified.members[0].provider_id, "p1");
 
         let resolve: ResolveCompatParams = serde_json::from_value(json!({
@@ -936,7 +823,7 @@ mod tests {
         let listed = listed(&conn);
         assert_eq!(listed["providers"][0]["baseUrl"], "https://api.example.com/v1");
         assert_eq!(listed["providers"][0]["models"][0]["baseUrl"], "https://proxy.example.com/v1");
-        assert_eq!(listed["defaultModel"], json!(null));
+        assert!(!listed.as_object().unwrap().contains_key("defaultModel"));
     }
 
     #[test]
@@ -980,95 +867,24 @@ mod tests {
     }
 
     #[test]
-    fn aliases_span_providers_only_with_one_shared_target() {
+    fn provider_and_unified_names_are_independent() {
         let conn = memory_db();
-        let models = || vec![aliased(model("gpt-5"), &["gpt"])];
-        operations::create_provider(&conn, &provider("A", true, models())).unwrap();
-        // The same key pointing at the same upstream model is a second candidate,
-        // not a conflict.
-        operations::create_provider(&conn, &provider("B", true, models())).unwrap();
-        assert_eq!(
-            operations::create_provider(
-                &conn,
-                &provider("C", true, vec![aliased(model("gpt-4"), &["gpt"])])
-            )
-            .unwrap_err()
-            .code,
-            ErrorCode::InvalidInput
-        );
-        assert_eq!(
-            operations::list_providers(&conn).unwrap().providers.len(),
-            2,
-            "a rejected create writes nothing"
-        );
+        let first = operations::create_provider(&conn, &provider("A", true, vec![model("shared")]))
+            .unwrap();
+        let aggregate = UnifiedModel {
+            id: "shared".into(),
 
-        // A disabled provider stays outside the check until it is enabled.
-        let disabled = provider("D", false, vec![aliased(model("gpt-4"), &["gpt"])]);
-        let stored = operations::create_provider(&conn, &disabled).unwrap();
-        let mut shown = disabled;
-        shown.enabled = true;
-        assert_eq!(
-            operations::update_provider(&conn, &stored.id, &shown).unwrap_err().code,
-            ErrorCode::InvalidInput
-        );
-        assert_eq!(
-            row_of(&listed(&conn), &stored.id)["enabled"],
-            json!(false),
-            "a rejected update keeps the stored row"
-        );
-    }
-
-    #[test]
-    fn an_unhidden_unified_model_owns_its_name() {
-        let conn = memory_db();
-        let stored = operations::create_provider(
-            &conn,
-            &provider("A", true, vec![aliased(model("gpt-5"), &["gpt-alias"])]),
-        )
-        .unwrap();
-        let member = || UnifiedMember { provider_id: stored.id.clone(), model: "gpt-5".into() };
-
-        // A hidden aggregate may share a registered name; an unhidden one may not.
-        let hidden = UnifiedModel { id: "gpt-5".into(), hide: true, members: vec![member()] };
-        operations::create_unified_model(&conn, &hidden).unwrap();
-        let visible = UnifiedModel { id: "gpt-alias".into(), hide: false, members: vec![member()] };
-        assert_eq!(
-            operations::create_unified_model(&conn, &visible).unwrap_err().code,
-            ErrorCode::InvalidInput
-        );
-        assert_eq!(
-            operations::list_unified_models(&conn).unwrap().len(),
-            1,
-            "a rejected create writes nothing"
-        );
-
-        // Un-hiding an aggregate under a registered name is refused too.
-        let mut shown = hidden.clone();
-        shown.hide = false;
-        assert_eq!(
-            operations::update_unified_model(&conn, "gpt-5", &shown).unwrap_err().code,
-            ErrorCode::InvalidInput
-        );
-
-        // A free name is granted, and then a provider model may not take it back.
-        let free = UnifiedModel { id: "brand".into(), hide: false, members: vec![member()] };
-        operations::create_unified_model(&conn, &free).unwrap();
-        assert_eq!(
-            operations::create_provider(&conn, &provider("B", true, vec![model("brand")]))
-                .unwrap_err()
-                .code,
-            ErrorCode::InvalidInput
-        );
-        assert_eq!(
-            operations::create_provider(
-                &conn,
-                &provider("B", true, vec![aliased(model("m"), &["brand"])])
-            )
-            .unwrap_err()
-            .code,
-            ErrorCode::InvalidInput
-        );
-        assert_eq!(operations::list_providers(&conn).unwrap().providers.len(), 1);
+            members: vec![UnifiedMember { provider_id: first.id.clone(), model: "shared".into() }],
+        };
+        operations::create_unified_model(&conn, &aggregate).unwrap();
+        operations::update_unified_model(&conn, "shared", &aggregate).unwrap();
+        let second =
+            operations::create_provider(&conn, &provider("B", true, vec![model("shared")]))
+                .unwrap();
+        operations::update_provider(&conn, &second.id, &provider("B", true, vec![model("shared")]))
+            .unwrap();
+        assert_eq!(operations::list_providers(&conn).unwrap().providers.len(), 2);
+        assert_eq!(operations::list_unified_models(&conn).unwrap().len(), 1);
     }
 
     #[test]
@@ -1079,7 +895,7 @@ mod tests {
 
         let unknown_model = UnifiedModel {
             id: "agg".into(),
-            hide: false,
+
             members: vec![UnifiedMember { provider_id: stored.id.clone(), model: "ghost".into() }],
         };
         assert_eq!(
@@ -1088,7 +904,7 @@ mod tests {
         );
         let unknown_provider = UnifiedModel {
             id: "agg".into(),
-            hide: false,
+
             members: vec![UnifiedMember { provider_id: "ghost".into(), model: "m1".into() }],
         };
         assert_eq!(
@@ -1103,7 +919,7 @@ mod tests {
             operations::create_provider(&conn, &provider("B", false, vec![model("m2")])).unwrap();
         let aggregate = UnifiedModel {
             id: "agg".into(),
-            hide: false,
+
             members: vec![UnifiedMember { provider_id: disabled.id, model: "m2".into() }],
         };
         assert_eq!(operations::create_unified_model(&conn, &aggregate).unwrap().id, "agg");
@@ -1115,21 +931,21 @@ mod tests {
         let stored =
             operations::create_provider(&conn, &provider("A", true, vec![model("m1")])).unwrap();
         let member = || UnifiedMember { provider_id: stored.id.clone(), model: "m1".into() };
-        let agg = UnifiedModel { id: "agg".into(), hide: false, members: vec![member()] };
+        let agg = UnifiedModel { id: "agg".into(), members: vec![member()] };
         operations::create_unified_model(&conn, &agg).unwrap();
         assert_eq!(
             operations::create_unified_model(&conn, &agg).unwrap_err().code,
             ErrorCode::InvalidInput
         );
 
-        let other = UnifiedModel { id: "other".into(), hide: false, members: vec![member()] };
+        let other = UnifiedModel { id: "other".into(), members: vec![member()] };
         operations::create_unified_model(&conn, &other).unwrap();
         // Renaming onto a taken name is refused; onto a free one it renames.
         assert_eq!(
             operations::update_unified_model(&conn, "other", &agg).unwrap_err().code,
             ErrorCode::InvalidInput
         );
-        let renamed = UnifiedModel { id: "renamed".into(), hide: false, members: vec![member()] };
+        let renamed = UnifiedModel { id: "renamed".into(), members: vec![member()] };
         assert_eq!(
             operations::update_unified_model(&conn, "other", &renamed).unwrap().id,
             "renamed"
@@ -1144,7 +960,7 @@ mod tests {
             operations::create_provider(&conn, &provider("A", true, vec![model("m1")])).unwrap();
         let draft = UnifiedModel {
             id: "agg".into(),
-            hide: false,
+
             members: vec![UnifiedMember { provider_id: stored.id.clone(), model: "m1".into() }],
         };
 
@@ -1166,39 +982,6 @@ mod tests {
             operations::update_unified_model(&conn, "ghost", &draft).unwrap_err().code,
             ErrorCode::NotFound
         );
-    }
-
-    #[test]
-    fn default_model_rejects_draft_models_and_round_trips() {
-        let conn = memory_db();
-        let ready = operations::create_provider(&conn, &provider("Ready", true, vec![model("m1")]))
-            .unwrap();
-        let mut draft_entry = model("draft-model");
-        draft_entry.apis.clear();
-        let draft = operations::create_provider(&conn, &provider("Draft", true, vec![draft_entry]))
-            .unwrap();
-
-        assert_eq!(
-            operations::set_default_model(&conn, "ghost", "m1").unwrap_err().code,
-            ErrorCode::NotFound
-        );
-        assert_eq!(
-            operations::set_default_model(&conn, &ready.id, "ghost").unwrap_err().code,
-            ErrorCode::InvalidInput
-        );
-        assert_eq!(
-            operations::set_default_model(&conn, &draft.id, "draft-model").unwrap_err().code,
-            ErrorCode::InvalidInput
-        );
-        assert!(operations::list_providers(&conn).unwrap().default_model.is_none());
-
-        operations::set_default_model(&conn, &ready.id, "m1").unwrap();
-        assert_eq!(
-            listed(&conn)["defaultModel"],
-            json!({ "providerId": ready.id, "modelId": "m1" })
-        );
-        operations::clear_default_model(&conn).unwrap();
-        assert!(operations::list_providers(&conn).unwrap().default_model.is_none());
     }
 
     #[test]
@@ -1350,7 +1133,7 @@ mod tests {
         let start = capture_from_here();
 
         let api_key = "sk-live-0123456789abcdef";
-        let mut draft = provider("Logged", true, vec![aliased(model("m1"), &["alias"])]);
+        let mut draft = provider("Logged", true, vec![model("m1")]);
         draft.api_key = SecretString::from(api_key);
         let stored = operations::create_provider(&conn, &draft).unwrap();
         operations::update_provider(&conn, &stored.id, &draft).unwrap();
@@ -1359,7 +1142,6 @@ mod tests {
             operations::create_provider(&conn, &draft).unwrap_err().code,
             ErrorCode::InvalidInput
         );
-        operations::set_default_model(&conn, &stored.id, "m1").unwrap();
         operations::delete_provider(&conn, &stored.id).unwrap();
 
         // The crate logs on its own startup path, so only the command layer is

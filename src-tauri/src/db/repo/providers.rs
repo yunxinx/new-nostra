@@ -105,7 +105,6 @@ struct RawModel {
     id: String,
     name: Option<String>,
     apis: String,
-    aliases: String,
     base_url: Option<String>,
     reasoning: i64,
     thinking_level_map: Option<String>,
@@ -142,7 +141,6 @@ fn read_model_row(row: &Row) -> rusqlite::Result<RawModel> {
         id: row.get("id")?,
         name: row.get("name")?,
         apis: row.get("apis")?,
-        aliases: row.get("aliases")?,
         base_url: row.get("base_url")?,
         reasoning: row.get("reasoning")?,
         thinking_level_map: row.get("thinking_level_map")?,
@@ -158,7 +156,6 @@ fn read_model_row(row: &Row) -> rusqlite::Result<RawModel> {
 
 struct RawUnified {
     id: String,
-    hide: i64,
 }
 
 /// Reads providers and their models in two queries (no per-provider round trip).
@@ -177,7 +174,7 @@ fn read_provider_rows(conn: &Connection) -> Result<Vec<RawProvider>, AppError> {
 
 fn read_model_rows(conn: &Connection) -> Result<Vec<RawModel>, AppError> {
     let mut stmt = conn.prepare_cached(
-        "SELECT provider_id, id, name, apis, aliases, base_url, reasoning, thinking_level_map,
+        "SELECT provider_id, id, name, apis, base_url, reasoning, thinking_level_map,
                 input, cost, context_window, max_tokens, sampling_params, headers, compat
          FROM models
          ORDER BY provider_id ASC, sort_order ASC",
@@ -191,7 +188,6 @@ fn decode_model(raw: RawModel) -> Result<ModelEntry, AppError> {
         id: raw.id,
         name: raw.name,
         apis: decode_json(&raw.apis, "apis")?,
-        aliases: decode_json(&raw.aliases, "aliases")?,
         base_url: raw.base_url,
         reasoning: raw.reasoning != 0,
         thinking_level_map: decode_optional_json(raw.thinking_level_map, "thinking_level_map")?,
@@ -371,7 +367,6 @@ pub fn delete(conn: &Connection, id: &str) -> Result<(), AppError> {
 
     // Explicit deletes in dependency order; the ON DELETE CASCADE clauses only back
     // them up, so no row ever disappears through an action this module did not plan.
-    tx.prepare_cached("DELETE FROM default_models WHERE provider_id = ?1")?.execute(params![id])?;
     tx.prepare_cached("DELETE FROM models WHERE provider_id = ?1")?.execute(params![id])?;
     prune_empty_unified_models(&tx)?;
     tx.prepare_cached("DELETE FROM providers WHERE id = ?1")?.execute(params![id])?;
@@ -410,9 +405,9 @@ pub fn list_unified(conn: &Connection) -> Result<Vec<UnifiedModelListItem>, AppE
         }
     }
 
-    let mut stmt = conn.prepare_cached("SELECT id, hide FROM unified_models ORDER BY id ASC")?;
+    let mut stmt = conn.prepare_cached("SELECT id FROM unified_models ORDER BY id ASC")?;
     let rows = stmt
-        .query_map([], |row| Ok(RawUnified { id: row.get(0)?, hide: row.get(1)? }))?
+        .query_map([], |row| Ok(RawUnified { id: row.get(0)? }))?
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut items = Vec::with_capacity(rows.len());
@@ -421,11 +416,7 @@ pub fn list_unified(conn: &Connection) -> Result<Vec<UnifiedModelListItem>, AppE
         if corrupted {
             items.push(UnifiedModelListItem::Corrupted(CorruptedUnified { id: raw.id }));
         } else {
-            items.push(UnifiedModelListItem::Unified(UnifiedModel {
-                id: raw.id,
-                hide: raw.hide != 0,
-                members,
-            }));
+            items.push(UnifiedModelListItem::Unified(UnifiedModel { id: raw.id, members }));
         }
     }
     Ok(items)
@@ -436,8 +427,7 @@ pub fn list_unified(conn: &Connection) -> Result<Vec<UnifiedModelListItem>, AppE
 /// trips the composite foreign key.
 pub fn create_unified(conn: &Connection, spec: &UnifiedModel) -> Result<UnifiedModel, AppError> {
     let tx = conn.unchecked_transaction()?;
-    tx.prepare_cached("INSERT INTO unified_models (id, hide) VALUES (?1, ?2)")?
-        .execute(params![spec.id, i64::from(spec.hide)])?;
+    tx.prepare_cached("INSERT INTO unified_models (id) VALUES (?1)")?.execute(params![spec.id])?;
     insert_members(&tx, spec)?;
     tx.commit()?;
     Ok(spec.clone())
@@ -462,8 +452,7 @@ pub fn update_unified(
             message: "unified model not found".into(),
         });
     }
-    tx.prepare_cached("INSERT INTO unified_models (id, hide) VALUES (?1, ?2)")?
-        .execute(params![spec.id, i64::from(spec.hide)])?;
+    tx.prepare_cached("INSERT INTO unified_models (id) VALUES (?1)")?.execute(params![spec.id])?;
     insert_members(&tx, spec)?;
     tx.commit()?;
     Ok(spec.clone())
@@ -483,74 +472,9 @@ pub fn delete_unified(conn: &Connection, id: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Returns the stored default as `(provider_id, model_id)`, or `None` while
-/// no default is set.
-pub fn get_default_model(conn: &Connection) -> Result<Option<(String, String)>, AppError> {
-    let row = conn
-        .query_row(
-            "SELECT provider_id, model_id FROM default_models WHERE singleton = 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    Ok(row)
-}
-
-/// Points the single default-model row at a model of that provider that has at
-/// least one protocol checked. An unknown provider is `NotFound`; an unknown or
-/// protocol-less model is `InvalidInput`.
-pub fn set_default_model(
-    conn: &Connection,
-    provider_id: &str,
-    model_id: &str,
-) -> Result<(), AppError> {
-    let provider: Option<bool> = conn
-        .query_row("SELECT 1 FROM providers WHERE id = ?1", params![provider_id], |_| Ok(true))
-        .optional()?;
-    if provider.is_none() {
-        return Err(AppError { code: ErrorCode::NotFound, message: "provider not found".into() });
-    }
-
-    let apis: Option<String> = conn
-        .query_row(
-            "SELECT apis FROM models WHERE provider_id = ?1 AND id = ?2",
-            params![provider_id, model_id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let Some(apis) = apis else {
-        return Err(AppError {
-            code: ErrorCode::InvalidInput,
-            message: format!("model `{model_id}` is not registered in this provider"),
-        });
-    };
-    // A draft model without a checked protocol can never be requested, so it cannot
-    // become the default either.
-    if decode_json::<Vec<Protocol>>(&apis, "apis")?.is_empty() {
-        return Err(AppError {
-            code: ErrorCode::InvalidInput,
-            message: format!("model `{model_id}` has no protocol checked"),
-        });
-    }
-
-    conn.prepare_cached(
-        "INSERT INTO default_models (singleton, provider_id, model_id) VALUES (1, ?1, ?2)
-         ON CONFLICT(singleton) DO UPDATE SET provider_id = excluded.provider_id,
-                                              model_id = excluded.model_id",
-    )?
-    .execute(params![provider_id, model_id])?;
-    Ok(())
-}
-
-/// Clears the default model; a no-op while none is set.
-pub fn clear_default_model(conn: &Connection) -> Result<(), AppError> {
-    conn.prepare_cached("DELETE FROM default_models WHERE singleton = 1")?.execute([])?;
-    Ok(())
-}
-
 /// Inserts or updates one model row by `(provider_id, id)`. The upsert keeps the
-/// row identity, so unified members and the default-model reference pointing at
-/// the model survive a provider rewrite.
+/// row identity, so unified members pointing at the model survive a provider
+/// rewrite.
 fn upsert_model(
     tx: &Transaction,
     provider_id: &str,
@@ -558,14 +482,13 @@ fn upsert_model(
     sort_order: i64,
 ) -> Result<(), AppError> {
     tx.prepare_cached(
-        "INSERT INTO models (provider_id, id, name, apis, aliases, base_url, reasoning,
+        "INSERT INTO models (provider_id, id, name, apis, base_url, reasoning,
                              thinking_level_map, input, cost, context_window, max_tokens,
                              sampling_params, headers, compat, sort_order)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
          ON CONFLICT(provider_id, id) DO UPDATE SET
              name = excluded.name,
              apis = excluded.apis,
-             aliases = excluded.aliases,
              base_url = excluded.base_url,
              reasoning = excluded.reasoning,
              thinking_level_map = excluded.thinking_level_map,
@@ -583,7 +506,6 @@ fn upsert_model(
         model.id,
         model.name,
         encode_json(&model.apis)?,
-        encode_json(&model.aliases)?,
         model.base_url,
         i64::from(model.reasoning),
         encode_optional_json(&model.thinking_level_map)?,
@@ -647,7 +569,6 @@ mod tests {
             id: "gpt-5.2".into(),
             name: None,
             apis: Vec::new(),
-            aliases: Vec::new(),
             base_url: None,
             reasoning: false,
             thinking_level_map: None,
@@ -668,7 +589,6 @@ mod tests {
             id: "anthropic/claude-sonnet-5".into(),
             name: Some("Claude Sonnet 5".into()),
             apis: vec![Protocol::from("anthropic-messages"), Protocol::from("openai-completions")],
-            aliases: vec!["sonnet".into(), "claude".into()],
             base_url: Some("https://proxy.example.com/v1".into()),
             reasoning: true,
             thinking_level_map: Some(BTreeMap::from([
@@ -845,7 +765,7 @@ mod tests {
             &conn,
             &UnifiedModel {
                 id: "fast".into(),
-                hide: false,
+
                 members: vec![UnifiedMember {
                     provider_id: provider_id.clone(),
                     model: "gpt-5.2".into(),
@@ -853,8 +773,6 @@ mod tests {
             },
         )
         .unwrap();
-        set_default_model(&conn, &provider_id, "anthropic/claude-sonnet-5").unwrap();
-
         let mut spec = full_config();
         spec.models.reverse();
         spec.name = "Renamed Gateway".into();
@@ -867,10 +785,6 @@ mod tests {
         assert_eq!(stored.config, spec);
         let models: Vec<&str> = stored.config.models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(models, vec!["gpt-5.2", "anthropic/claude-sonnet-5"]);
-        assert_eq!(
-            get_default_model(&conn).unwrap(),
-            Some((provider_id.clone(), "anthropic/claude-sonnet-5".to_string()))
-        );
         assert_eq!(unified_of(&list_unified(&conn).unwrap(), "fast").members.len(), 1);
     }
 
@@ -883,7 +797,7 @@ mod tests {
             &conn,
             &UnifiedModel {
                 id: "fast".into(),
-                hide: false,
+
                 members: vec![
                     UnifiedMember {
                         provider_id: provider_id.clone(),
@@ -894,14 +808,10 @@ mod tests {
             },
         )
         .unwrap();
-        set_default_model(&conn, &provider_id, "anthropic/claude-sonnet-5").unwrap();
-
-        // Dropping the pinned model takes the default row (ForeignKey CASCADE) and
-        // the first member with it.
+        // Dropping a pinned model takes the member with it.
         let mut spec = full_config();
         spec.models.retain(|model| model.id != "anthropic/claude-sonnet-5");
         update(&conn, &provider_id, &spec).unwrap();
-        assert_eq!(get_default_model(&conn).unwrap(), None);
         let unified = unified_of(&list_unified(&conn).unwrap(), "fast");
         assert_eq!(unified.members.len(), 1);
         assert_eq!(unified.members[0].model, "gpt-5.2");
@@ -924,7 +834,7 @@ mod tests {
             &conn,
             &UnifiedModel {
                 id: "shared".into(),
-                hide: false,
+
                 members: vec![
                     UnifiedMember { provider_id: doomed.id.clone(), model: "gpt-5.2".into() },
                     UnifiedMember { provider_id: kept.id.clone(), model: "kept-model".into() },
@@ -936,7 +846,7 @@ mod tests {
             &conn,
             &UnifiedModel {
                 id: "doomed-only".into(),
-                hide: true,
+
                 members: vec![UnifiedMember {
                     provider_id: doomed.id.clone(),
                     model: "gpt-5.2".into(),
@@ -944,11 +854,8 @@ mod tests {
             },
         )
         .unwrap();
-        set_default_model(&conn, &doomed.id, "anthropic/claude-sonnet-5").unwrap();
-
         delete(&conn, &doomed.id).unwrap();
 
-        assert_eq!(get_default_model(&conn).unwrap(), None);
         assert_eq!(row_count(&conn, "providers"), 1);
         let models: Vec<String> = {
             let mut stmt = conn.prepare("SELECT id FROM models ORDER BY id").unwrap();
@@ -967,7 +874,6 @@ mod tests {
             shared.members,
             vec![UnifiedMember { provider_id: kept.id.clone(), model: "kept-model".into() }]
         );
-        assert!(!shared.hide);
     }
 
     #[test]
@@ -1015,7 +921,7 @@ mod tests {
                 &conn,
                 &UnifiedModel {
                     id: id.into(),
-                    hide: false,
+
                     members: vec![UnifiedMember {
                         provider_id: provider.id.clone(),
                         model: "m1".into(),
@@ -1049,7 +955,7 @@ mod tests {
 
         let spec = UnifiedModel {
             id: "fast".into(),
-            hide: false,
+
             members: vec![
                 UnifiedMember { provider_id: provider.id.clone(), model: "m1".into() },
                 UnifiedMember { provider_id: second.id.clone(), model: "m2".into() },
@@ -1061,7 +967,7 @@ mod tests {
         // Renaming and reordering in one update rewrites positions wholesale.
         let renamed = UnifiedModel {
             id: "faster".into(),
-            hide: true,
+
             members: vec![
                 UnifiedMember { provider_id: second.id.clone(), model: "m2".into() },
                 UnifiedMember { provider_id: provider.id.clone(), model: "m1".into() },
@@ -1087,41 +993,6 @@ mod tests {
     }
 
     #[test]
-    fn default_model_requires_a_registered_model_with_a_checked_protocol() {
-        let conn = memory_db();
-        let provider = create(&conn, &simple_config("Primary", "m1")).unwrap();
-        let mut draft_config = simple_config("Draft", "draft-model");
-        draft_config.models[0].apis.clear();
-        let draft = create(&conn, &draft_config).unwrap();
-
-        assert_eq!(
-            set_default_model(&conn, "missing", "m1").unwrap_err().code,
-            ErrorCode::NotFound
-        );
-        assert_eq!(
-            set_default_model(&conn, &provider.id, "missing-model").unwrap_err().code,
-            ErrorCode::InvalidInput
-        );
-        assert_eq!(
-            set_default_model(&conn, &draft.id, "draft-model").unwrap_err().code,
-            ErrorCode::InvalidInput,
-            "a draft model without a checked protocol cannot be the default"
-        );
-        assert_eq!(get_default_model(&conn).unwrap(), None);
-
-        // One pick replaces the previous one.
-        set_default_model(&conn, &provider.id, "m1").unwrap();
-        assert_eq!(
-            get_default_model(&conn).unwrap(),
-            Some((provider.id.clone(), "m1".to_string()))
-        );
-        set_default_model(&conn, &draft.id, "draft-model").unwrap_err();
-        clear_default_model(&conn).unwrap();
-        assert_eq!(get_default_model(&conn).unwrap(), None);
-        clear_default_model(&conn).unwrap();
-    }
-
-    #[test]
     fn writes_to_a_missing_provider_report_not_found() {
         let conn = memory_db();
         assert_eq!(
@@ -1144,9 +1015,7 @@ mod tests {
         .unwrap();
 
         assert!(create(&conn, &full_config()).is_err());
-        for table in
-            ["providers", "models", "unified_models", "unified_model_members", "default_models"]
-        {
+        for table in ["providers", "models", "unified_models", "unified_model_members"] {
             assert_eq!(row_count(&conn, table), 0, "a failed create must leave {table} untouched");
         }
     }
@@ -1159,7 +1028,7 @@ mod tests {
             &conn,
             &UnifiedModel {
                 id: "fast".into(),
-                hide: false,
+
                 members: vec![UnifiedMember {
                     provider_id: created.id.clone(),
                     model: "gpt-5.2".into(),
@@ -1167,8 +1036,6 @@ mod tests {
             },
         )
         .unwrap();
-        set_default_model(&conn, &created.id, "anthropic/claude-sonnet-5").unwrap();
-
         // The failing statement is the provider UPDATE, i.e. after the model diff:
         // every earlier statement of the transaction must roll back with it.
         conn.execute(
@@ -1182,10 +1049,6 @@ mod tests {
         assert!(update(&conn, &created.id, &spec).is_err());
 
         assert_eq!(provider_of(&list(&conn).unwrap(), &created.id).config, full_config());
-        assert_eq!(
-            get_default_model(&conn).unwrap(),
-            Some((created.id.clone(), "anthropic/claude-sonnet-5".to_string()))
-        );
         assert_eq!(unified_of(&list_unified(&conn).unwrap(), "fast").members.len(), 1);
     }
 }

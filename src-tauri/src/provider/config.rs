@@ -1,12 +1,3 @@
-//! Provider configuration validation and effective-value resolution.
-//!
-//! Validation covers every rule checkable without a database; the rules that
-//! need the stored provider set (provider name uniqueness, cross-provider alias
-//! conflicts, unified-model name collisions, member registration) run in the
-//! command layer inside the write transaction. Resolution merges the compat
-//! layers of one selected protocol and reports where each effective field came
-//! from, so the GUI and the request encoder share a single source of defaults.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
@@ -38,40 +29,12 @@ fn invalid(message: impl Into<String>) -> AppError {
     AppError { code: ErrorCode::InvalidInput, message: message.into() }
 }
 
-/// Splits an absolute `http`/`https` URL into its host (authority without
-/// userinfo, port kept) and path. `None` when the URL is not absolute http(s) or
-/// has no host.
-fn split_url(url: &str) -> Option<(&str, &str)> {
-    let (scheme, rest) = url.split_once("://")?;
-    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+pub(crate) fn url_host(raw: &str) -> Option<String> {
+    let url = url::Url::parse(raw).ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
         return None;
     }
-    let (authority, path) = match rest.find(['/', '?', '#']) {
-        Some(index) => (&rest[..index], &rest[index..]),
-        None => (rest, ""),
-    };
-    let host = match authority.rsplit_once('@') {
-        Some((_, host)) => host,
-        None => authority,
-    };
-    if strip_port(host).is_empty() {
-        return None;
-    }
-    Some((host, path))
-}
-
-/// Host of an absolute http(s) URL (authority without userinfo, port kept) for
-/// vendor detection; `None` when the URL does not parse.
-pub(crate) fn url_host(url: &str) -> Option<&str> {
-    split_url(url).map(|(host, _)| host)
-}
-
-/// Drops the `:port` part of an authority, leaving IPv6 literals intact.
-pub(crate) fn strip_port(authority: &str) -> &str {
-    match authority.rfind(':') {
-        Some(index) if !authority[index + 1..].contains(']') => &authority[..index],
-        _ => authority,
-    }
+    url.host_str().map(str::to_owned)
 }
 
 /// Validates a base URL and returns its stored form: trimmed, with trailing
@@ -88,18 +51,25 @@ pub fn normalize_base_url(raw: &str) -> Result<String, AppError> {
     if url.contains('?') || url.contains('#') {
         return Err(invalid("base URL must not carry a query or fragment"));
     }
-    let Some((_, path)) = split_url(url) else {
+    let Ok(parsed) = url::Url::parse(url) else {
         return Err(invalid("base URL must be an absolute http(s) URL with a host"));
     };
-    if ENDPOINT_SUFFIXES.iter().any(|suffix| path.ends_with(suffix)) {
+    if !matches!(parsed.scheme(), "http" | "https")
+        || !url.to_ascii_lowercase().starts_with(&format!("{}://", parsed.scheme()))
+        || parsed.host_str().is_none()
+    {
+        return Err(invalid("base URL must be an absolute http(s) URL with a host"));
+    }
+    if ENDPOINT_SUFFIXES.iter().any(|suffix| parsed.path().trim_end_matches('/').ends_with(suffix))
+    {
         return Err(invalid("base URL must not include a chat endpoint path"));
     }
     Ok(url.to_owned())
 }
 
 /// Validates a provider draft: everything checkable without the stored provider
-/// set. Model registration, provider name uniqueness and cross-provider alias
-/// conflicts are checked by the command layer inside the write transaction.
+/// set. Model registration, provider name uniqueness and unified-model name
+/// collisions are checked by the command layer inside the write transaction.
 /// Base URLs are checked but not rewritten, so the caller stores the form
 /// `normalize_base_url` returns instead of the raw input.
 pub fn validate_provider(config: &ProviderConfig) -> Result<(), AppError> {
@@ -143,23 +113,6 @@ pub fn validate_provider(config: &ProviderConfig) -> Result<(), AppError> {
         }
     }
 
-    // Aliases are the downstream reference names: unique inside the provider and
-    // never shadowing a model request name.
-    let mut aliases = BTreeSet::new();
-    for model in &config.models {
-        for alias in &model.aliases {
-            let alias = alias.trim();
-            if alias.is_empty() {
-                return Err(invalid(format!("model `{}` has a blank alias", model.id)));
-            }
-            if ids.contains(alias) {
-                return Err(invalid(format!("alias `{alias}` is also a model id")));
-            }
-            if !aliases.insert(alias) {
-                return Err(invalid(format!("duplicate alias `{alias}`")));
-            }
-        }
-    }
     Ok(())
 }
 
@@ -517,12 +470,29 @@ fn merge_object(current: &mut Value, overlay: &Value) {
     }
 }
 
-/// Expands a downstream reference name into upstream candidates in attempt
-/// order: a unified model name expands to its members (position order); any
-/// other name collects every enabled provider whose model request name or alias
-/// matches (provider creation order). Members pinned to a disabled or unknown
-/// provider are skipped, so a unified model whose members are all unavailable
-/// resolves to nothing.
+/// Who is asking to resolve a name.
+// Reason: both scopes are constructed by the request domain that has yet to
+// land — the gateway answers a downstream name, the app its own. Revoke with
+// the allowance on [`resolve_model_reference`], their only caller.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelScope {
+    /// A downstream client of the gateway. It reaches a model only through a
+    /// unified model, so a name is a routing decision made on the unified-model
+    /// page and two providers can serve the same name without a rule
+    /// arbitrating between them.
+    Gateway,
+    /// The app itself, which is where the catalogue is edited: a stored model
+    /// is addressable by the request name it is stored under.
+    App,
+}
+
+/// Expands a name into upstream candidates in attempt order. A unified model
+/// name expands to its members (position order), and under [`ModelScope::App`]
+/// a request name collects every enabled provider carrying it (provider
+/// creation order). Members pinned to a disabled or unknown provider are
+/// skipped, so a unified model whose members are all unavailable resolves to
+/// nothing, and a name no unified model claims resolves to nothing downstream.
 // Reason: reference resolution is the request domain's addressing entry; revoke
 // with its first production caller.
 #[allow(dead_code)]
@@ -530,9 +500,10 @@ pub fn resolve_model_reference(
     providers: &[Provider],
     unified_models: &[UnifiedModel],
     name: &str,
+    scope: ModelScope,
 ) -> Vec<(String, String)> {
     // A hidden unified model owns its name outright; validation keeps the name
-    // unique against model names and aliases otherwise.
+    // free of stored model ids otherwise.
     if let Some(unified) = unified_models.iter().find(|unified| unified.id == name) {
         return unified
             .members
@@ -541,10 +512,13 @@ pub fn resolve_model_reference(
             .map(|member| (member.provider_id.clone(), member.model.clone()))
             .collect();
     }
+    if scope == ModelScope::Gateway {
+        return Vec::new();
+    }
     let mut candidates = Vec::new();
     for provider in providers.iter().filter(|provider| provider.config.enabled) {
         for model in &provider.config.models {
-            if model.id == name || model.aliases.iter().any(|alias| alias == name) {
+            if model.id == name {
                 candidates.push((provider.id.clone(), model.id.clone()));
             }
         }
@@ -653,6 +627,9 @@ mod tests {
             "ftp://api.example.com",
             "https://",
             "https://:8080/v1",
+            "https://api.example.com:99999/v1",
+            "https://api.example.com:abc/v1",
+            "http://[not-ipv6]/v1",
             "https://api example.com/v1",
             "https://api.example.com/v1?key=1",
             "https://api.example.com/v1#top",
@@ -757,49 +734,6 @@ mod tests {
         entry.apis = vec![Protocol::from(MESSAGES), completions()];
         known.models.push(entry);
         assert!(validate_provider(&known).is_ok());
-    }
-
-    #[test]
-    fn aliases_stay_unique_and_never_shadow_a_model_id() {
-        // A model id and its consumer-facing alias are different kinds of name.
-        let mut identity = config("https://api.example.com");
-        let mut entry = model("m1");
-        entry.aliases = vec!["m1".into()];
-        identity.models.push(entry);
-        assert_invalid(validate_provider(&identity));
-
-        let mut shadowing = config("https://api.example.com");
-        shadowing.models.push(model("m1"));
-        let mut aliased = model("m2");
-        aliased.aliases = vec!["m1".into()];
-        shadowing.models.push(aliased);
-        assert_invalid(validate_provider(&shadowing));
-
-        let mut duplicated = config("https://api.example.com");
-        for id in ["m1", "m2"] {
-            let mut entry = model(id);
-            entry.aliases = vec!["shared".into()];
-            duplicated.models.push(entry);
-        }
-        assert_invalid(validate_provider(&duplicated));
-
-        let mut blank = config("https://api.example.com");
-        let mut entry = model("m1");
-        entry.aliases = vec!["  ".into()];
-        blank.models.push(entry);
-        assert_invalid(validate_provider(&blank));
-
-        // Aliases of one provider are independent names: distinct values pass,
-        // and an alias may repeat another model's display name.
-        let mut valid = config("https://api.example.com");
-        let mut first = model("m1");
-        first.name = Some("Shared Display".into());
-        first.aliases = vec!["short".into(), "shorter".into()];
-        let mut second = model("m2");
-        second.name = Some("Shared Display Two".into());
-        second.aliases = vec!["Shared Display".into()];
-        valid.models.extend([first, second]);
-        assert!(validate_provider(&valid).is_ok());
     }
 
     #[test]
@@ -1133,33 +1067,47 @@ mod tests {
     }
 
     #[test]
-    fn references_expand_model_ids_and_aliases_in_provider_order() {
-        let mut alpha = model("claude-opus-5");
-        alpha.aliases = vec!["opus".into()];
-        let mut beta = model("opus");
-        beta.aliases = vec!["opus-pro".into()];
+    fn references_expand_model_ids_in_provider_order() {
         let providers = vec![
-            provider_entry("p1", true, vec![alpha]),
-            provider_entry("p2", true, vec![beta]),
+            provider_entry("p1", true, vec![model("claude-opus-5")]),
+            provider_entry("p2", true, vec![model("opus")]),
             provider_entry("p3", false, vec![model("opus")]),
         ];
 
-        // One alias key and one request name can point at the same candidate set.
+        // One request name can be carried by several providers; the app sees
+        // them all, in provider creation order.
         assert_eq!(
-            resolve_model_reference(&providers, &[], "opus"),
-            vec![
-                ("p1".to_owned(), "claude-opus-5".to_owned()),
-                ("p2".to_owned(), "opus".to_owned())
-            ]
-        );
-        assert_eq!(
-            resolve_model_reference(&providers, &[], "opus-pro"),
+            resolve_model_reference(&providers, &[], "opus", ModelScope::App),
             vec![("p2".to_owned(), "opus".to_owned())]
         );
         // A disabled provider contributes no candidates.
-        assert!(resolve_model_reference(&providers, &[], "disabled-only").is_empty());
-        assert!(resolve_model_reference(&providers[2..], &[], "opus").is_empty());
-        assert!(resolve_model_reference(&providers, &[], "unknown").is_empty());
+        assert!(
+            resolve_model_reference(&providers, &[], "disabled-only", ModelScope::App).is_empty()
+        );
+        assert!(resolve_model_reference(&providers[2..], &[], "opus", ModelScope::App).is_empty());
+        assert!(resolve_model_reference(&providers, &[], "unknown", ModelScope::App).is_empty());
+    }
+
+    #[test]
+    fn a_downstream_reference_reaches_only_unified_models() {
+        let providers = vec![
+            provider_entry("p1", true, vec![model("m1")]),
+            provider_entry("p2", true, vec![model("m2")]),
+        ];
+
+        // A stored model is addressable by the app, and invisible downstream
+        // until a unified model routes the name to it.
+        assert_eq!(
+            resolve_model_reference(&providers, &[], "m1", ModelScope::App),
+            vec![("p1".to_owned(), "m1".to_owned())]
+        );
+        assert!(resolve_model_reference(&providers, &[], "m1", ModelScope::Gateway).is_empty());
+
+        let unified_models = vec![unified("claude", &[("p1", "m1")])];
+        assert_eq!(
+            resolve_model_reference(&providers, &unified_models, "claude", ModelScope::Gateway),
+            vec![("p1".to_owned(), "m1".to_owned())]
+        );
     }
 
     #[test]
@@ -1172,22 +1120,24 @@ mod tests {
 
         // Disabled member dropped, order preserved.
         assert_eq!(
-            resolve_model_reference(&providers, &unified_models, "claude"),
+            resolve_model_reference(&providers, &unified_models, "claude", ModelScope::Gateway),
             vec![("p1".to_owned(), "m1".to_owned())]
         );
 
         let all_disabled = vec![unified("kimi", &[("p2", "m2")])];
-        assert!(resolve_model_reference(&providers, &all_disabled, "kimi").is_empty());
+        assert!(resolve_model_reference(&providers, &all_disabled, "kimi", ModelScope::Gateway)
+            .is_empty());
 
         let missing = vec![unified("ghost", &[("gone", "m9")])];
-        assert!(resolve_model_reference(&providers, &missing, "ghost").is_empty());
+        assert!(
+            resolve_model_reference(&providers, &missing, "ghost", ModelScope::Gateway).is_empty()
+        );
 
-        // A unified name owns its name; a model aliased to it does not shadow it.
-        let mut named = model("claude-alias-owner");
-        named.aliases = vec!["claude".into()];
-        let shadowed = vec![provider_entry("p1", true, vec![model("m1"), named])];
+        // A unified name owns its name: a stored model of the same name does
+        // not shadow it downstream.
+        let shadowed = vec![provider_entry("p1", true, vec![model("m1"), model("claude")])];
         assert_eq!(
-            resolve_model_reference(&shadowed, &unified_models, "claude"),
+            resolve_model_reference(&shadowed, &unified_models, "claude", ModelScope::Gateway),
             vec![("p1".to_owned(), "m1".to_owned())]
         );
     }

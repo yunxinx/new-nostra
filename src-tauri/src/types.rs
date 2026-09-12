@@ -231,8 +231,7 @@ pub struct Provider {
 }
 
 /// One provider model: `id` is the upstream request name, `apis` the checked
-/// protocol set (array order is check order), `aliases` the downstream reference
-/// names rewritten to `id` on the way out.
+/// protocol set (array order is check order).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelEntry {
@@ -241,8 +240,6 @@ pub struct ModelEntry {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub apis: Vec<Protocol>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub aliases: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
     #[serde(default)]
@@ -367,13 +364,12 @@ pub enum Weekday {
 }
 
 /// Cross-provider aggregate name: members are pinned `(provider, model)` pairs in
-/// attempt order, and `hide` suppresses the member models as standalone entries.
+/// attempt order; its name is independent of provider model names.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UnifiedModel {
     pub id: String,
-    #[serde(default)]
-    pub hide: bool,
+
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<UnifiedMember>,
 }
@@ -790,7 +786,6 @@ mod tests {
                     "id": "openai/gpt-5.2",
                     "name": "GPT-5.2",
                     "apis": ["openai-responses", "openai-completions"],
-                    "aliases": ["gpt", "gpt5"],
                     "baseUrl": "https://openrouter.ai/api/v1/gpt",
                     "reasoning": true,
                     "thinkingLevelMap": { "off": null, "minimal": "minimal", "high": "high", "max": "max" },
@@ -893,7 +888,6 @@ mod tests {
             model.apis,
             vec![Protocol::from("openai-responses"), Protocol::from("openai-completions")]
         );
-        assert_eq!(model.aliases, vec!["gpt".to_owned(), "gpt5".to_owned()]);
         assert_eq!(model.input, vec![InputModality::Text, InputModality::Image]);
         let level_map = model.thinking_level_map.as_ref().unwrap();
         assert_eq!(level_map.get(&ThinkingLevel::Off), Some(&None));
@@ -985,7 +979,6 @@ mod tests {
         let model: ModelEntry = serde_json::from_value(json!({ "id": "qwen3:8b" })).unwrap();
         assert_eq!(model.input, vec![InputModality::Text]);
         assert!(model.apis.is_empty());
-        assert!(model.aliases.is_empty());
         assert!(!model.reasoning);
         assert_eq!(model.name, None);
         assert_eq!(model.cost, None);
@@ -1292,7 +1285,7 @@ mod tests {
     fn unified_model_round_trips_members_in_order() {
         let fixture = json!({
             "id": "claude-sonnet-5",
-            "hide": true,
+
             "members": [
                 {
                     "providerId": "0192aaaa-bbbb-7ccc-8ddd-eeeeffff0001",
@@ -1307,7 +1300,7 @@ mod tests {
         let unified: UnifiedModel = serde_json::from_value(fixture.clone()).unwrap();
         assert_eq!(unified.members[0].provider_id, "0192aaaa-bbbb-7ccc-8ddd-eeeeffff0001");
         assert_eq!(unified.members[1].model, "claude-sonnet-5");
-        assert!(unified.hide);
+
         assert_eq!(serde_json::to_value(&unified).unwrap(), fixture);
     }
 }

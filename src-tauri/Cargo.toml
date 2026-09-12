@@ -38,6 +38,7 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 tokio = { version = "1.53.1", features = ["sync"] }
 uuid = { version = "1.26.0", features = ["v7"] }
 log = "0.4.34"
+url = "2.5.8"
 
 [lints.rust]
 unsafe_code = "deny"

@@ -113,6 +113,23 @@ pub const MIGRATIONS: &[Migration] = &[
             ) STRICT;
         ",
     },
+    // Model aliases and the single default model are gone: a name now reaches
+    // a downstream client through a unified model, and the app picks the model
+    // it speaks to per conversation. Both are dropped here rather than left as
+    // unread columns, so no code can start reading them again.
+    Migration {
+        version: 3,
+        description: "drop_model_aliases_and_default_model",
+        sql: "
+            DROP TABLE default_models;
+            ALTER TABLE models DROP COLUMN aliases;
+        ",
+    },
+    Migration {
+        version: 4,
+        description: "drop_unified_model_hide",
+        sql: "ALTER TABLE unified_models DROP COLUMN hide;",
+    },
 ];
 
 pub fn run_migrations(conn: &Connection) -> Result<(), AppError> {
@@ -176,7 +193,7 @@ mod tests {
     fn fresh_database_runs_to_latest() {
         let conn = migrated_memory_db();
         let version: u32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 4);
     }
 
     #[test]
@@ -294,7 +311,7 @@ mod tests {
     #[test]
     fn provider_tables_are_strict_with_expected_columns() {
         let conn = migrated_memory_db();
-        let expected: [(&str, &[&str]); 5] = [
+        let expected: [(&str, &[&str]); 4] = [
             (
                 "providers",
                 &[
@@ -322,7 +339,6 @@ mod tests {
                     "id",
                     "name",
                     "apis",
-                    "aliases",
                     "base_url",
                     "reasoning",
                     "thinking_level_map",
@@ -336,9 +352,8 @@ mod tests {
                     "sort_order",
                 ],
             ),
-            ("unified_models", &["id", "hide"]),
+            ("unified_models", &["id"]),
             ("unified_model_members", &["unified_id", "provider_id", "model", "position"]),
-            ("default_models", &["singleton", "provider_id", "model_id"]),
         ];
 
         for (table, columns) in expected {
@@ -381,7 +396,6 @@ mod tests {
             primary_key("unified_model_members"),
             vec!["unified_id", "provider_id", "model"]
         );
-        assert_eq!(primary_key("default_models"), vec!["singleton"]);
     }
 
     #[test]
@@ -418,12 +432,6 @@ mod tests {
         ];
         members.sort();
         assert_eq!(foreign_keys("unified_model_members"), members);
-        let mut defaults = vec![
-            cascade("models", "provider_id", "provider_id"),
-            cascade("models", "model_id", "id"),
-        ];
-        defaults.sort();
-        assert_eq!(foreign_keys("default_models"), defaults);
     }
 
     #[test]
@@ -491,7 +499,7 @@ mod tests {
         );
         assert!(orphan_member.is_err(), "member must reference an existing unified model");
 
-        conn.execute("INSERT INTO unified_models (id, hide) VALUES ('u1', 0)", []).unwrap();
+        conn.execute("INSERT INTO unified_models (id) VALUES ('u1')", []).unwrap();
         let dangling_pin = conn.execute(
             "INSERT INTO unified_model_members (unified_id, provider_id, model, position)
              VALUES ('u1', 'p1', 'ghost', 0)",
@@ -528,7 +536,7 @@ mod tests {
         conn.execute("INSERT INTO models (provider_id, id, sort_order) VALUES ('p1', 'm2', 1)", [])
             .unwrap();
 
-        conn.execute("INSERT INTO unified_models (id, hide) VALUES ('u1', 0)", []).unwrap();
+        conn.execute("INSERT INTO unified_models (id) VALUES ('u1')", []).unwrap();
         let insert_member = |model: &str, position: i64| {
             conn.execute(
                 "INSERT INTO unified_model_members (unified_id, provider_id, model, position)
@@ -557,16 +565,11 @@ mod tests {
         rejects("UPDATE providers SET max_retries = 5 WHERE id = 'p1'");
         rejects("UPDATE providers SET enabled = 2 WHERE id = 'p1'");
         rejects("UPDATE providers SET abort_on_disconnect = 2 WHERE id = 'p1'");
-        rejects("INSERT INTO unified_models (id, hide) VALUES ('u1', 2)");
         rejects(
             "INSERT INTO models (provider_id, id, sort_order, reasoning) VALUES ('p1', 'm1', 0, 2)",
         );
-        // With the model registered, only CHECK (singleton = 1) can reject this insert.
         conn.execute("INSERT INTO models (provider_id, id, sort_order) VALUES ('p1', 'm1', 0)", [])
             .unwrap();
-        rejects(
-            "INSERT INTO default_models (singleton, provider_id, model_id) VALUES (2, 'p1', 'm1')",
-        );
     }
 
     #[test]
@@ -589,6 +592,67 @@ mod tests {
             .query_row("SELECT apis FROM models WHERE id = 'm1'", [], |row| row.get(0))
             .unwrap();
         assert_eq!(apis, "[\"openai-completions\", \"future-family\"]");
+    }
+
+    #[test]
+    fn upgrading_a_v3_catalog_preserves_models_and_ordered_members() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for migration in MIGRATIONS.iter().filter(|migration| migration.version <= 3) {
+            conn.execute_batch(migration.sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 3u32).unwrap();
+        conn.execute_batch(
+            "INSERT INTO providers (id, name, api, base_url, created_at, updated_at)
+             VALUES ('p1', 'Saved provider', 'openai-completions', 'https://api.example.com', 't', 't');
+             INSERT INTO models (provider_id, id, sort_order) VALUES ('p1', 'm1', 0), ('p1', 'm2', 1);
+             INSERT INTO unified_models (id, hide) VALUES ('hidden', 1), ('visible', 0);
+             INSERT INTO unified_model_members (unified_id, provider_id, model, position)
+             VALUES ('hidden', 'p1', 'm2', 0), ('hidden', 'p1', 'm1', 1), ('visible', 'p1', 'm1', 0);",
+        )
+        .unwrap();
+
+        run_migrations(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+
+        let columns: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_table_info('unified_models')")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(columns, ["id"]);
+        let members: Vec<(String, String, String, i64)> = conn
+            .prepare("SELECT unified_id, provider_id, model, position FROM unified_model_members ORDER BY unified_id, position")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            members,
+            [
+                ("hidden".into(), "p1".into(), "m2".into(), 0),
+                ("hidden".into(), "p1".into(), "m1".into(), 1),
+                ("visible".into(), "p1".into(), "m1".into(), 0),
+            ]
+        );
+        let models: Vec<(String, String, i64)> = conn
+            .prepare("SELECT providers.name, models.id, models.sort_order FROM models JOIN providers ON providers.id = models.provider_id ORDER BY models.sort_order")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            models,
+            [("Saved provider".into(), "m1".into(), 0), ("Saved provider".into(), "m2".into(), 1),]
+        );
+        let foreign_key_errors: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(foreign_key_errors, 0);
     }
 
     #[test]
@@ -616,7 +680,7 @@ mod tests {
         run_migrations(&conn).unwrap();
 
         let version: u32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 4);
         let title: String = conn
             .query_row("SELECT title FROM sessions WHERE id = 's1'", [], |row| row.get(0))
             .unwrap();

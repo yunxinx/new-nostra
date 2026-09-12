@@ -26,8 +26,6 @@ pub fn handler() -> impl Fn(Invoke) -> bool + Send + Sync + 'static {
         providers::create_provider,
         providers::update_provider,
         providers::delete_provider,
-        providers::set_default_model,
-        providers::clear_default_model,
         providers::resolve_compat,
         providers::list_unified_models,
         providers::create_unified_model,
