@@ -12,7 +12,6 @@ import type {
   CorruptedProvider,
   CorruptedUnified,
   CreatedSession,
-  DefaultModel,
   Entry,
   InputModality,
   MaxTokensField,
@@ -123,7 +122,6 @@ const PRESET_FIXTURE = `{
       "id": "deepseek-flash",
       "name": "DeepSeek Flash",
       "apis": ["openai-completions"],
-      "aliases": ["flash"],
       "reasoning": true,
       "input": ["text"],
       "cost": {
@@ -170,7 +168,6 @@ const PROVIDER_FIXTURE = `{
       "id": "openai/gpt-5.2",
       "name": "GPT-5.2",
       "apis": ["openai-responses", "openai-completions"],
-      "aliases": ["gpt", "gpt5"],
       "baseUrl": "https://openrouter.ai/api/v1/gpt",
       "reasoning": true,
       "thinkingLevelMap": { "off": null, "minimal": "minimal", "high": "high", "max": "max" },
@@ -221,16 +218,16 @@ const RESPONSES_COMPAT_FIXTURE = `{
   "supportsMaxOutputTokens": true
 }`;
 
-// The fixed JSON below is the design §3.2 protocol sample, the same fixture the
+// The fixed JSON below is the canonical protocol sample, the same fixture the
 // Rust side decodes in src-tauri/src/types.rs tests; field names here must
-// match that serde output exactly (AC-10).
+// match that serde output exactly.
 
 const TEXT_BLOCK_WITH_METADATA =
   '{ "type": "text", "text": "hello", "providerMetadata": { "vendor": { "opaque": "value" } } }';
 const TEXT_BLOCK_WITHOUT_METADATA = '{ "type": "text", "text": "hi" }';
 
 const UNIFIED_FIXTURE =
-  '{ "id": "fast", "hide": false, "members": [ { "providerId": "0192aaaa-bbbb-7ccc-8ddd-eeeeffff0001", "model": "deepseek-flash" }, { "providerId": "0192aaaa-bbbb-7ccc-8ddd-eeeeffff0001", "model": "deepseek-v4-pro" } ] }';
+  '{ "id": "fast", "members": [ { "providerId": "0192aaaa-bbbb-7ccc-8ddd-eeeeffff0001", "model": "deepseek-flash" }, { "providerId": "0192aaaa-bbbb-7ccc-8ddd-eeeeffff0001", "model": "deepseek-v4-pro" } ] }';
 
 function field(value: unknown, key: string): unknown {
   if (typeof value !== "object" || value === null) {
@@ -279,7 +276,6 @@ function providerFixture(): Provider {
     "openai-completions": { maxTokensField: "max_tokens" },
   };
   const model: ModelEntry = {
-    aliases: ["gpt", "gpt5"],
     apis: ["openai-responses", "openai-completions"],
     baseUrl: "https://openrouter.ai/api/v1/gpt",
     compat: { "openai-responses": { supportsToolSearch: true } },
@@ -663,19 +659,12 @@ describe("degraded rows and list payloads", () => {
     expect(unifiedItems).toHaveLength(1);
   });
 
-  it("pairs the provider list with an explicit null default model", () => {
-    const defaultModel: DefaultModel = {
-      modelId: "deepseek-flash",
-      providerId: "0192aaaa-bbbb-7ccc-8ddd-eeeeffff0001",
-    };
-    const payload: Providers = { defaultModel, providers: [providerFixture()] };
-    const cleared: Providers = { defaultModel: null, providers: [] };
-    expect(payload.defaultModel?.modelId).toBe("deepseek-flash");
-    expect(cleared.defaultModel).toBeNull();
-    const parsed: unknown = JSON.parse(
-      '{ "providers": [], "defaultModel": null }',
+  it("carries the provider list under one key", () => {
+    const payload: Providers = { providers: [providerFixture()] };
+    const parsed: unknown = JSON.parse('{ "providers": [] }');
+    expect(JSON.parse(JSON.stringify({ ...payload, providers: [] }))).toEqual(
+      parsed,
     );
-    expect(JSON.parse(JSON.stringify(cleared))).toEqual(parsed);
   });
 });
 
@@ -722,7 +711,6 @@ describe("preset and unified model mirrors", () => {
       headers: {},
       models: [
         {
-          aliases: ["flash"],
           apis: ["openai-completions"],
           contextWindow: 1000000,
           cost: {
@@ -775,7 +763,7 @@ describe("preset and unified model mirrors", () => {
         providerId: "0192aaaa-bbbb-7ccc-8ddd-eeeeffff0001",
       },
     ];
-    const unified: UnifiedModel = { hide: false, id: "fast", members };
+    const unified: UnifiedModel = { id: "fast", members };
     const draft: UnifiedModelDraft = unified;
     const parsed: unknown = JSON.parse(UNIFIED_FIXTURE);
     expect(JSON.parse(JSON.stringify(draft))).toEqual(parsed);

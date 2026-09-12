@@ -3,6 +3,7 @@ import { SquarePen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { SidebarToggleButton } from "@/components/common/SidebarToggleButton";
 import { TitleBarControls } from "@/components/common/TitleBarControls";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,13 +12,14 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useTheme } from "@/features/appearance/use-theme";
+import { ChatHeader } from "@/features/chat/components/ChatHeader";
 import { MessageList } from "@/features/chat/components/MessageList";
 import { ComposerFocusContext } from "@/features/chat/composer-focus-context";
 import { Sidebar } from "@/features/sessions/components/Sidebar";
-import { SidebarToggleButton } from "@/features/sessions/components/SidebarToggleButton";
 import { useSidebarPersistence } from "@/features/sessions/use-sidebar-persistence";
 import { useSendMessage } from "@/hooks/use-send-message";
 import { useShortcuts } from "@/hooks/use-shortcuts";
+import { isMacOs } from "@/lib/platform";
 import { draftKeyFor, useUiStore } from "@/stores/ui-store";
 
 export function App() {
@@ -32,6 +34,9 @@ export function App() {
   const draftId = useUiStore((s) => s.draftId);
   const composerKey = activeSessionId ?? draftKeyFor(draftId);
   const startNewChat = useUiStore((s) => s.startNewChat);
+  const sidebarWidth = useUiStore((s) => s.sidebarWidth);
+  const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
+  const toggleSidebarCollapsed = useUiStore((s) => s.toggleSidebarCollapsed);
   const [composerFocusKey, setComposerFocusKey] = useState<null | string>(null);
   const cancelFocusTrackingRef = useRef<(() => void) | null>(null);
 
@@ -102,8 +107,11 @@ export function App() {
     );
   }
 
+  // Shell contract: clipping and the containing block travel together, so a
+  // stray positioned box cannot escape to the initial containing block and
+  // scroll the window.
   return (
-    <div className="bg-background text-foreground flex h-screen overflow-hidden">
+    <div className="bg-background text-foreground relative flex h-screen overflow-hidden">
       <Sidebar />
       <main className="flex min-w-0 flex-1 flex-col">
         {/* Reserved title row: drag surface behind the fixed controls; the
@@ -130,8 +138,19 @@ export function App() {
           </ComposerFocusContext>
         </section>
       </main>
+      <div
+        className="fixed top-0 z-50 flex h-[34px] min-w-0 items-center pr-2 transition-[left] duration-220 ease-in-out motion-reduce:transition-none"
+        style={{
+          left: sidebarCollapsed ? (isMacOs() ? 148 : 80) : sidebarWidth + 6,
+        }}
+      >
+        <ChatHeader composerKey={composerKey} />
+      </div>
       <TitleBarControls>
-        <SidebarToggleButton />
+        <SidebarToggleButton
+          isCollapsed={sidebarCollapsed}
+          onToggle={toggleSidebarCollapsed}
+        />
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

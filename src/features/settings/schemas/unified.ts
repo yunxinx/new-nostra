@@ -22,7 +22,6 @@ const unifiedMemberSchema = z.object({
  */
 export const unifiedModelDraftSchema = z
   .object({
-    hide: z.boolean().optional(),
     id: z
       .string()
       .refine((id) => id.trim() !== "", "unified model id must not be blank"),

@@ -60,9 +60,18 @@ export function SessionList() {
     }
   }
 
+  // Rows are inset by padding, not by a scrollbar gutter: `scrollbar-gutter:
+  // stable` reserves the strip even when the list is too short to scroll, and
+  // the reserved width is not the styled 8px scrollbar's, so the two insets
+  // cannot match. With padding on both sides the scrollbar appears only once
+  // the list overflows, and it sits on the boundary with the conversation
+  // area. `overflow-x-clip` keeps stray horizontal overflow from adding a
+  // second scrollbar.
+  const scrollPane = "min-h-0 flex-1 overflow-x-clip overflow-y-auto p-2";
+
   if (isLibraryEmpty) {
     return (
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div className={scrollPane}>
         <p className="text-muted-foreground px-1 py-6 text-center text-sm select-none">
           {t("sessions.empty")}
         </p>
@@ -71,7 +80,7 @@ export function SessionList() {
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto p-2" onScroll={handleScroll}>
+    <div className={scrollPane} onScroll={handleScroll}>
       <div className="flex flex-col gap-1">
         {pinned.isLoading && <LoadingRows />}
         {pinned.error !== null && (

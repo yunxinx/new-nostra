@@ -7,8 +7,8 @@ import { modelCostSchema } from "./model-cost";
 // Provider draft validation, mirroring the DB-free half of the Rust rules
 // (src-tauri/src/provider/config.rs: normalize_base_url, validate_provider,
 // validate_model). Rules that read the stored provider set — provider name
-// uniqueness, cross-provider alias conflicts, unified-name collisions, member
-// registration — stay in the write transaction and are not duplicated here.
+// uniqueness, unified-name collisions, member registration — stay in the write
+// transaction and are not duplicated here.
 
 /** Largest value a Rust `u32` field accepts. */
 const U32_MAX = 4_294_967_295;
@@ -38,31 +38,23 @@ function baseUrlError(raw: string): null | string {
   if (url.includes("?") || url.includes("#")) {
     return "base URL must not carry a query or fragment";
   }
-  const separator = url.indexOf("://");
-  const scheme = separator === -1 ? "" : url.slice(0, separator).toLowerCase();
-  if (scheme !== "http" && scheme !== "https") {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
     return "base URL must be an absolute http(s) URL with a host";
   }
-  const rest = url.slice(separator + 3);
-  const pathStart = rest.search(/[/?#]/);
-  const authority = pathStart === -1 ? rest : rest.slice(0, pathStart);
-  const path = pathStart === -1 ? "" : rest.slice(pathStart);
-  const at = authority.lastIndexOf("@");
-  if (stripPort(at === -1 ? authority : authority.slice(at + 1)) === "") {
+  if (!/^https?:\/\//i.test(url) || parsed.hostname === "") {
     return "base URL must be an absolute http(s) URL with a host";
   }
-  if (ENDPOINT_SUFFIXES.some((suffix) => path.endsWith(suffix))) {
+  if (
+    ENDPOINT_SUFFIXES.some((suffix) =>
+      parsed.pathname.replace(/\/+$/, "").endsWith(suffix),
+    )
+  ) {
     return "base URL must not include a chat endpoint path";
   }
   return null;
-}
-
-/** Drops the `:port` part of an authority, leaving IPv6 literals intact. */
-function stripPort(authority: string): string {
-  const index = authority.lastIndexOf(":");
-  return index !== -1 && !authority.slice(index + 1).includes("]")
-    ? authority.slice(0, index)
-    : authority;
 }
 
 const baseUrlSchema = z.string().superRefine((url, ctx) => {
@@ -129,47 +121,35 @@ const thinkingLevelMapSchema = z.strictObject({
 
 /**
  * One model row: `id` is the upstream request name, `apis` the checked protocol
- * set and `aliases` the downstream reference names. Uniqueness of ids, display
- * names and aliases inside a provider is checked by `providerDraftSchema`,
- * which sees the whole model list.
+ * set. Uniqueness of ids and display names inside a provider is checked by
+ * `providerDraftSchema`, which sees the whole model list.
  */
-export const modelEntrySchema = z
-  .object({
-    aliases: z.array(z.string()).optional(),
-    apis: apisSchema.optional(),
-    baseUrl: baseUrlSchema.nullish(),
-    compat: compatBucketsSchema.nullish(),
-    contextWindow: z
-      .int()
-      .min(1, "contextWindow must be greater than zero")
-      .max(U32_MAX, "contextWindow exceeds the supported range")
-      .nullish(),
-    cost: modelCostSchema.nullish(),
-    headers: z.record(z.string(), z.string()).nullish(),
-    id: modelIdSchema,
-    input: z
-      .array(z.enum(["image", "text"]))
-      .min(1, "model input must accept at least one modality")
-      .optional(),
-    maxTokens: z
-      .int()
-      .min(1, "maxTokens must be greater than zero")
-      .max(U32_MAX, "maxTokens exceeds the supported range")
-      .nullish(),
-    name: z.string().nullish(),
-    reasoning: z.boolean().optional(),
-    samplingParams: z.record(z.string(), jsonValueSchema).nullish(),
-    thinkingLevelMap: thinkingLevelMapSchema.nullish(),
-  })
-  .superRefine((model, ctx) => {
-    if ((model.aliases ?? []).some((alias) => alias.trim() === "")) {
-      ctx.addIssue({
-        code: "custom",
-        message: "model alias must not be blank",
-        path: ["aliases"],
-      });
-    }
-  });
+export const modelEntrySchema = z.object({
+  apis: apisSchema.optional(),
+  baseUrl: baseUrlSchema.nullish(),
+  compat: compatBucketsSchema.nullish(),
+  contextWindow: z
+    .int()
+    .min(1, "contextWindow must be greater than zero")
+    .max(U32_MAX, "contextWindow exceeds the supported range")
+    .nullish(),
+  cost: modelCostSchema.nullish(),
+  headers: z.record(z.string(), z.string()).nullish(),
+  id: modelIdSchema,
+  input: z
+    .array(z.enum(["image", "text"]))
+    .min(1, "model input must accept at least one modality")
+    .optional(),
+  maxTokens: z
+    .int()
+    .min(1, "maxTokens must be greater than zero")
+    .max(U32_MAX, "maxTokens exceeds the supported range")
+    .nullish(),
+  name: z.string().nullish(),
+  reasoning: z.boolean().optional(),
+  samplingParams: z.record(z.string(), jsonValueSchema).nullish(),
+  thinkingLevelMap: thinkingLevelMapSchema.nullish(),
+});
 
 /** Parsed model row, as the cross-model identity rules read it. */
 type ParsedModelEntry = z.output<typeof modelEntrySchema>;
@@ -210,34 +190,6 @@ function checkModelIdentities(
       return;
     }
     names.add(name);
-  });
-  // An alias is a downstream name: never another model's request name, never a
-  // second time in the same provider.
-  const aliases = new Set<string>();
-  models.forEach((model, index) => {
-    for (const alias of model.aliases ?? []) {
-      const trimmed = alias.trim();
-      if (trimmed === "") {
-        continue;
-      }
-      if (ids.has(trimmed)) {
-        ctx.addIssue({
-          code: "custom",
-          message: `alias \`${trimmed}\` is also a model id`,
-          path: ["models", index, "aliases"],
-        });
-        return;
-      }
-      if (aliases.has(trimmed)) {
-        ctx.addIssue({
-          code: "custom",
-          message: `duplicate alias \`${trimmed}\``,
-          path: ["models", index, "aliases"],
-        });
-        return;
-      }
-      aliases.add(trimmed);
-    }
   });
 }
 

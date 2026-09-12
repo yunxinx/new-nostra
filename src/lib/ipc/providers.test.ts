@@ -12,7 +12,6 @@ import type {
 } from "@/types/ipc";
 
 import {
-  clearDefaultModel,
   createProvider,
   createUnifiedModel,
   deleteProvider,
@@ -21,7 +20,6 @@ import {
   listProviders,
   listUnifiedModels,
   resolveCompat,
-  setDefaultModel,
   updateProvider,
   updateUnifiedModel,
 } from "./providers";
@@ -54,7 +52,7 @@ beforeEach(() => {
 
 describe("providers IPC wrappers", () => {
   it("listProviders forwards the command name with no params object", async () => {
-    const payload: Providers = { defaultModel: null, providers: [] };
+    const payload: Providers = { providers: [] };
     mockInvoke.mockResolvedValue(payload);
     await expect(listProviders()).resolves.toEqual(payload);
     expect(mockInvoke).toHaveBeenCalledTimes(1);
@@ -67,13 +65,6 @@ describe("providers IPC wrappers", () => {
     await listUnifiedModels();
     expect(mockInvoke).toHaveBeenNthCalledWith(1, "list_provider_presets");
     expect(mockInvoke).toHaveBeenNthCalledWith(2, "list_unified_models");
-  });
-
-  it("clearDefaultModel invokes with no params object", async () => {
-    mockInvoke.mockResolvedValue(undefined);
-    await clearDefaultModel();
-    expect(mockInvoke).toHaveBeenCalledTimes(1);
-    expect(mockInvoke).toHaveBeenCalledWith("clear_default_model");
   });
 
   it("createProvider sends the full draft under params", async () => {
@@ -93,14 +84,6 @@ describe("providers IPC wrappers", () => {
     ).resolves.toEqual(STORED_PROVIDER);
     expect(mockInvoke).toHaveBeenCalledWith("update_provider", {
       params: { id: STORED_PROVIDER.id, provider: PROVIDER_DRAFT },
-    });
-  });
-
-  it("setDefaultModel sends camelCase provider and model ids", async () => {
-    mockInvoke.mockResolvedValue(undefined);
-    await setDefaultModel({ modelId: "deepseek-flash", providerId: "p1" });
-    expect(mockInvoke).toHaveBeenCalledWith("set_default_model", {
-      params: { modelId: "deepseek-flash", providerId: "p1" },
     });
   });
 
@@ -142,7 +125,6 @@ describe("providers IPC wrappers", () => {
 
   it("create and update unified model send the draft under params", async () => {
     const unified: UnifiedModel = {
-      hide: false,
       id: "fast",
       members: [{ model: "deepseek-flash", providerId: "p1" }],
     };
@@ -178,7 +160,7 @@ describe("providers IPC wrappers", () => {
     };
     mockInvoke.mockRejectedValue(failure);
     await expect(
-      createUnifiedModel({ unified: { hide: false, id: "fast" } }),
+      createUnifiedModel({ unified: { id: "fast" } }),
     ).rejects.toEqual(failure);
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   messagesKeys,
+  providerPresetsKeys,
   providersKeys,
   sessionsKeys,
   unifiedModelsKeys,
@@ -38,8 +39,9 @@ describe("query key factories", () => {
     );
   });
 
-  it("keeps the provider and unified-model roots disjoint", () => {
+  it("keeps the provider, preset and unified-model roots disjoint", () => {
     expect(providersKeys.all).toEqual(["providers"]);
+    expect(providerPresetsKeys.all).toEqual(["providerPresets"]);
     expect(unifiedModelsKeys.all).toEqual(["unifiedModels"]);
   });
 });

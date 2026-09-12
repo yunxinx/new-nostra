@@ -13,6 +13,10 @@ export function initI18n(): void {
     : "en";
   void i18next.use(initReactI18next).init({
     fallbackLng: "en",
+    // React escapes every string it renders, so i18next's own escaping only
+    // double-escapes: an interpolated model id like "vendor/model" would
+    // reach the DOM as "vendor&#x2F;model".
+    interpolation: { escapeValue: false },
     lng: language,
     resources: {
       en: { translation: en },

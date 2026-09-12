@@ -40,12 +40,6 @@ export interface ResolveCompatParams {
   provider: ProviderDraft;
 }
 
-/** set_default_model request: the model reference to promote to default. */
-export interface SetDefaultModelParams {
-  modelId: string;
-  providerId: string;
-}
-
 /**
  * update_provider request: `id` locates the row, the draft replaces it
  * wholesale.
@@ -65,17 +59,9 @@ export interface UpdateUnifiedModelParams {
 }
 
 /**
- * Clears the default-model reference; succeeds even when none is set. Rejects
- * with AppError only on database failure.
- */
-export function clearDefaultModel(): Promise<void> {
-  return invoke("clear_default_model");
-}
-
-/**
  * Creates a provider from a full draft and returns the stored row. Rejects with
  * AppError when validation fails (blank or duplicate name, base-url rules,
- * alias constraints) or the database write fails.
+ * model-name rules) or the database write fails.
  */
 export function createProvider(
   params: CreateProviderParams,
@@ -86,8 +72,7 @@ export function createProvider(
 /**
  * Creates a unified model from a draft; members must pin registered models and
  * stay in attempt order. Rejects with AppError on validation failure (blank
- * name, empty or duplicate members, name collision with an unhidden model or
- * alias).
+ * name, empty or duplicate members, duplicate unified name).
  */
 export function createUnifiedModel(
   params: CreateUnifiedModelParams,
@@ -97,8 +82,7 @@ export function createUnifiedModel(
 
 /**
  * Deletes the provider with its models and any unified-model members pinned to
- * them; default-model and empty-aggregate cleanup happens in the same
- * transaction. Rejects with AppError when the id is missing.
+ * them in the same transaction. Rejects with AppError when the id is missing.
  */
 export function deleteProvider(params: DeleteProviderParams): Promise<void> {
   return invoke("delete_provider", { params });
@@ -123,8 +107,8 @@ export function listProviderPresets(): Promise<ProviderPreset[]> {
 }
 
 /**
- * Lists every stored provider in creation order plus the default-model
- * reference; a corrupted row arrives as a `ProviderListItem` placeholder.
+ * Lists every stored provider in creation order; a corrupted row arrives as
+ * a `ProviderListItem` placeholder.
  * Rejects with AppError on database failure.
  */
 export function listProviders(): Promise<Providers> {
@@ -150,15 +134,6 @@ export function resolveCompat(
   params: ResolveCompatParams,
 ): Promise<ResolvedCompat> {
   return invoke("resolve_compat", { params });
-}
-
-/**
- * Stores one model as the single default; the model must exist and its `apis`
- * set must be non-empty. Rejects with AppError on a missing provider or model,
- * or an empty `apis`.
- */
-export function setDefaultModel(params: SetDefaultModelParams): Promise<void> {
-  return invoke("set_default_model", { params });
 }
 
 /**

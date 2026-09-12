@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { PROTOCOL_FAMILIES } from "@/lib/protocols";
+
 import { jsonValueSchema } from "./json";
 import { modelCostSchema } from "./model-cost";
 
@@ -10,11 +12,7 @@ import { modelCostSchema } from "./model-cost";
 // src-tauri/src/provider/config.rs validate_compat_bucket.
 
 /** Protocol family names with a compat struct; the wire type stays open. */
-export const protocolFamilySchema = z.enum([
-  "anthropic-messages",
-  "openai-completions",
-  "openai-responses",
-]);
+export const protocolFamilySchema = z.enum(PROTOCOL_FAMILIES);
 
 const KNOWN_FAMILIES = new Set<string>(protocolFamilySchema.options);
 

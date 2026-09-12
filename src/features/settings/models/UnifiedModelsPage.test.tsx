@@ -1,0 +1,393 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+
+import type { Provider, UnifiedModel, UnifiedModelListItem } from "@/types/ipc";
+
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { initI18n } from "@/lib/i18n";
+import {
+  createUnifiedModel,
+  deleteUnifiedModel,
+  listProviders,
+  listUnifiedModels,
+  updateUnifiedModel,
+} from "@/lib/ipc/providers";
+
+import { UnifiedModelsPage } from "./UnifiedModelsPage";
+
+vi.mock("@/lib/ipc/providers", () => ({
+  createUnifiedModel: vi.fn(),
+  deleteUnifiedModel: vi.fn(),
+  listProviders: vi.fn(),
+  listUnifiedModels: vi.fn(),
+  updateUnifiedModel: vi.fn(),
+}));
+
+const createUnifiedModelMock = vi.mocked(createUnifiedModel);
+const deleteUnifiedModelMock = vi.mocked(deleteUnifiedModel);
+const listProvidersMock = vi.mocked(listProviders);
+const listUnifiedModelsMock = vi.mocked(listUnifiedModels);
+const updateUnifiedModelMock = vi.mocked(updateUnifiedModel);
+
+// Radix Switch measures its thumb through a ResizeObserver, which jsdom does
+// not implement.
+class StubResizeObserver implements ResizeObserver {
+  target: Element | null = null;
+
+  disconnect(): void {
+    this.target = null;
+  }
+
+  observe(target: Element): void {
+    this.target = target;
+  }
+
+  unobserve(): void {
+    this.target = null;
+  }
+}
+
+const GATEWAY: Provider = {
+  abortOnDisconnect: true,
+  api: "openai-completions",
+  apiKey: "",
+  baseUrl: "https://gateway.example",
+  enabled: true,
+  id: "p1",
+  maxRetries: 2,
+  models: [
+    { apis: ["openai-completions"], id: "gpt-4o", reasoning: false },
+    { apis: ["openai-completions"], id: "gpt-4o-mini", reasoning: false },
+  ],
+  name: "Gateway",
+  reasoningOutput: "auto",
+  requestTimeoutMs: 120_000,
+  streamIdleTimeoutMs: 120_000,
+};
+
+const ANTHROPIC: Provider = {
+  ...GATEWAY,
+  id: "p2",
+  models: [
+    { apis: ["anthropic-messages"], id: "claude-sonnet", reasoning: true },
+  ],
+  name: "Anthropic",
+};
+
+const STORED: UnifiedModel = {
+  id: "fast",
+  members: [
+    { model: "gpt-4o-mini", providerId: "p1" },
+    { model: "claude-sonnet", providerId: "p2" },
+  ],
+};
+
+let queryClient: QueryClient;
+
+beforeAll(initI18n);
+beforeEach(() => {
+  queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  vi.resetAllMocks();
+  listProvidersMock.mockResolvedValue({
+    providers: [GATEWAY, ANTHROPIC],
+  });
+  vi.stubGlobal("ResizeObserver", StubResizeObserver);
+});
+afterEach(() => {
+  cleanup();
+  queryClient.clear();
+  vi.unstubAllGlobals();
+});
+
+/** Row cells of the rendered table, header row excluded. */
+function bodyRows(): Array<Array<null | string>> {
+  return screen
+    .getAllByRole("row")
+    .slice(1)
+    .map((row) =>
+      Array.from(row.querySelectorAll("td")).map((cell) => cell.textContent),
+    );
+}
+
+/** The ordered member labels of the editor's left pane. */
+function orderedMembers(): Array<null | string> {
+  return screen
+    .getAllByRole("listitem")
+    .filter((item) => item.parentElement?.tagName === "OL")
+    .map((item) => item.textContent);
+}
+
+/**
+ * Renders the page and waits for `settled` to appear. An empty library and a
+ * library still being read both show exactly one body row, so the row count
+ * cannot be the settle signal.
+ */
+async function renderPage(
+  unified: UnifiedModelListItem[],
+  settled: string,
+): Promise<void> {
+  listUnifiedModelsMock.mockResolvedValue(unified);
+  render(
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <UnifiedModelsPage />
+      </TooltipProvider>
+    </QueryClientProvider>,
+  );
+  await screen.findByText(settled);
+}
+
+describe("unified model list", () => {
+  it("selects rows and shows each member in attempt order", async () => {
+    await renderPage([STORED], "fast");
+
+    const row = bodyRows()[0] ?? [];
+    expect(screen.getByRole("checkbox", { name: "fast" })).toBeTruthy();
+    expect(row[1]).toContain("fast");
+    expect(row[2]).toBe("1Gateway / gpt-4o-mini2Anthropic / claude-sonnet");
+  });
+
+  it("says the aggregate has no members rather than leaving the cell blank", async () => {
+    await renderPage([{ id: "empty", members: [] }], "empty");
+
+    expect(bodyRows()[0]?.[2]).toBe("No members yet");
+  });
+
+  it("offers only a delete on a corrupted aggregate", async () => {
+    await renderPage(
+      [{ corrupted: true, id: "broken" }],
+      "Corrupted unified model",
+    );
+
+    expect(screen.getByText("Corrupted unified model")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Edit unified model" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Delete unified model" }),
+    ).toBeTruthy();
+  });
+
+  it("deletes an aggregate through the confirmation", async () => {
+    deleteUnifiedModelMock.mockResolvedValue();
+    await renderPage([STORED], "fast");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete unified model" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(deleteUnifiedModelMock).toHaveBeenCalledWith(
+        { id: "fast" },
+        expect.anything(),
+      );
+    });
+  });
+
+  it("says the library is empty instead of showing an empty table", async () => {
+    await renderPage([], "No unified models yet");
+
+    expect(screen.getByText("No unified models yet")).toBeTruthy();
+  });
+});
+
+describe("unified model editor", () => {
+  it("creates an aggregate from the members picked in the right pane", async () => {
+    createUnifiedModelMock.mockImplementation(({ unified }) =>
+      Promise.resolve(unified),
+    );
+    await renderPage([], "No unified models yet");
+
+    fireEvent.click(screen.getByRole("button", { name: "New unified model" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "fast" },
+    });
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Gateway / gpt-4o-mini" }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Anthropic / claude-sonnet" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(createUnifiedModelMock).toHaveBeenCalledTimes(1);
+    });
+    expect(createUnifiedModelMock).toHaveBeenCalledWith(
+      {
+        unified: {
+          id: "fast",
+          members: [
+            { model: "gpt-4o-mini", providerId: "p1" },
+            { model: "claude-sonnet", providerId: "p2" },
+          ],
+        },
+      },
+      expect.anything(),
+    );
+  });
+
+  it("picks in one pane and arranges the order in the other", async () => {
+    await renderPage([], "No unified models yet");
+    fireEvent.click(screen.getByRole("button", { name: "New unified model" }));
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Gateway / gpt-4o" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Anthropic / claude-sonnet" }),
+    );
+    expect(orderedMembers()[0]).toContain("Gateway / gpt-4o");
+
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Move member up" })[1] ??
+        document.body,
+    );
+
+    expect(orderedMembers()[0]).toContain("Anthropic / claude-sonnet");
+    expect(orderedMembers()[1]).toContain("Gateway / gpt-4o");
+  });
+
+  it("unchecking a candidate removes it from the order", async () => {
+    await renderPage([], "No unified models yet");
+    fireEvent.click(screen.getByRole("button", { name: "New unified model" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Gateway / gpt-4o" }));
+    expect(orderedMembers()).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Gateway / gpt-4o" }));
+
+    expect(screen.getByText("No members yet")).toBeTruthy();
+  });
+
+  it("narrows the candidate pane without touching the order", async () => {
+    await renderPage([], "No unified models yet");
+    fireEvent.click(screen.getByRole("button", { name: "New unified model" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Gateway / gpt-4o" }));
+
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search candidates" }),
+      { target: { value: "claude" } },
+    );
+
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+    expect(orderedMembers()).toHaveLength(1);
+  });
+
+  it("refuses a blank name and an empty member list before writing", async () => {
+    await renderPage([], "No unified models yet");
+    fireEvent.click(screen.getByRole("button", { name: "New unified model" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getAllByText("Invalid input").length).toBeGreaterThan(0);
+    expect(createUnifiedModelMock).not.toHaveBeenCalled();
+  });
+
+  it("prefills a stored aggregate and submits it under its own id", async () => {
+    updateUnifiedModelMock.mockImplementation(({ unified }) =>
+      Promise.resolve(unified),
+    );
+    await renderPage([STORED], "fast");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit unified model" }));
+
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveProperty(
+      "value",
+      "fast",
+    );
+    expect(orderedMembers()).toHaveLength(2);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "renamed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(updateUnifiedModelMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateUnifiedModelMock).toHaveBeenCalledWith(
+      { id: "fast", unified: { ...STORED, id: "renamed" } },
+      expect.anything(),
+    );
+  });
+
+  it("restores the stored draft when the editor is reset", async () => {
+    await renderPage([STORED], "fast");
+    fireEvent.click(screen.getByRole("button", { name: "Edit unified model" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "edited" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveProperty(
+      "value",
+      "fast",
+    );
+  });
+
+  it("returns to the list without writing anything", async () => {
+    await renderPage([STORED], "fast");
+    fireEvent.click(screen.getByRole("button", { name: "Edit unified model" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Unified models" }));
+
+    expect(
+      screen.getByRole("button", { name: "New unified model" }),
+    ).toBeTruthy();
+    expect(updateUnifiedModelMock).not.toHaveBeenCalled();
+  });
+});
+
+it("finds a candidate by id when it also has a display name", async () => {
+  listProvidersMock.mockResolvedValue({
+    providers: [
+      {
+        ...GATEWAY,
+        models: [{ id: "request-id", name: "Friendly", reasoning: false }],
+      },
+    ],
+  });
+  await renderPage([], "No unified models yet");
+  fireEvent.click(screen.getByRole("button", { name: "New unified model" }));
+  fireEvent.change(
+    screen.getByRole("searchbox", { name: "Search candidates" }),
+    { target: { value: "request-id" } },
+  );
+  expect(
+    screen.getByRole("checkbox", { name: "Gateway / Friendly" }),
+  ).toBeTruthy();
+});
+
+it("keeps a changed draft until leaving is confirmed", async () => {
+  await renderPage([STORED], "fast");
+  fireEvent.click(screen.getByRole("button", { name: "Edit unified model" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+    target: { value: "unsaved" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Unified models" }));
+  expect(screen.getByRole("textbox", { name: "Name" })).toHaveProperty(
+    "value",
+    "unsaved",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+  expect(
+    screen.getByRole("button", { name: "New unified model" }),
+  ).toBeTruthy();
+});

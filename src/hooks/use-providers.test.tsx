@@ -8,33 +8,36 @@ import type {
   AppError,
   Provider,
   ProviderDraft,
+  ProviderPreset,
   Providers,
   UnifiedModel,
   UnifiedModelListItem,
 } from "@/types/ipc";
 
 import {
-  clearDefaultModel,
   createProvider,
   createUnifiedModel,
   deleteProvider,
   deleteUnifiedModel,
+  listProviderPresets,
   listProviders,
   listUnifiedModels,
-  setDefaultModel,
   updateProvider,
   updateUnifiedModel,
 } from "@/lib/ipc/providers";
-import { providersKeys, unifiedModelsKeys } from "@/lib/query-keys";
+import {
+  providerPresetsKeys,
+  providersKeys,
+  unifiedModelsKeys,
+} from "@/lib/query-keys";
 
 import {
-  useClearDefaultModel,
   useCreateProvider,
   useCreateUnifiedModel,
   useDeleteProvider,
   useDeleteUnifiedModel,
+  useProviderPresets,
   useProviders,
-  useSetDefaultModel,
   useUnifiedModels,
   useUpdateProvider,
   useUpdateUnifiedModel,
@@ -47,26 +50,24 @@ import {
 // mutationKey), hence the `expect.anything()` that lets it through.
 
 vi.mock("@/lib/ipc/providers", () => ({
-  clearDefaultModel: vi.fn(),
   createProvider: vi.fn(),
   createUnifiedModel: vi.fn(),
   deleteProvider: vi.fn(),
   deleteUnifiedModel: vi.fn(),
+  listProviderPresets: vi.fn(),
   listProviders: vi.fn(),
   listUnifiedModels: vi.fn(),
-  setDefaultModel: vi.fn(),
   updateProvider: vi.fn(),
   updateUnifiedModel: vi.fn(),
 }));
 
-const clearDefaultModelMock = vi.mocked(clearDefaultModel);
 const createProviderMock = vi.mocked(createProvider);
 const createUnifiedModelMock = vi.mocked(createUnifiedModel);
 const deleteProviderMock = vi.mocked(deleteProvider);
 const deleteUnifiedModelMock = vi.mocked(deleteUnifiedModel);
+const listProviderPresetsMock = vi.mocked(listProviderPresets);
 const listProvidersMock = vi.mocked(listProviders);
 const listUnifiedModelsMock = vi.mocked(listUnifiedModels);
-const setDefaultModelMock = vi.mocked(setDefaultModel);
 const updateProviderMock = vi.mocked(updateProvider);
 const updateUnifiedModelMock = vi.mocked(updateUnifiedModel);
 
@@ -85,8 +86,23 @@ const PROVIDER_DRAFT: ProviderDraft = {
 
 const PROVIDER: Provider = { ...PROVIDER_DRAFT, id: "p1" };
 
+const PRESET: ProviderPreset = {
+  api: "openai-completions",
+  baseUrl: "https://openrouter.ai/api/v1",
+  compat: { "openai-completions": { supportsDeveloperRole: false } },
+  headers: { "X-OpenRouter-Title": "Nostra" },
+  models: [
+    {
+      apis: ["anthropic-messages", "openai-completions"],
+      id: "anthropic/claude-sonnet-5",
+      reasoning: true,
+    },
+  ],
+  name: "OpenRouter",
+  presetId: "openrouter",
+};
+
 const UNIFIED: UnifiedModel = {
-  hide: false,
   id: "fast",
   members: [{ model: "m1", providerId: "p1" }],
 };
@@ -104,10 +120,7 @@ function isInvalidated(key: readonly unknown[]): boolean {
 // attached, an invalidation marks the cache entry without a refetch racing the
 // assertion.
 function seedCaches(): void {
-  queryClient.setQueryData<Providers>(providersKeys.all, {
-    defaultModel: null,
-    providers: [],
-  });
+  queryClient.setQueryData<Providers>(providersKeys.all, { providers: [] });
   queryClient.setQueryData<UnifiedModelListItem[]>(unifiedModelsKeys.all, []);
 }
 
@@ -130,21 +143,14 @@ afterEach(() => {
 });
 
 describe("provider queries", () => {
-  it("fills the providers cache and projects the default reference", async () => {
-    const payload: Providers = {
-      defaultModel: { modelId: "m1", providerId: "p1" },
-      providers: [PROVIDER],
-    };
+  it("fills the providers cache from the stored list", async () => {
+    const payload: Providers = { providers: [PROVIDER] };
     listProvidersMock.mockResolvedValue(payload);
     const { result } = renderHook(() => useProviders(), { wrapper: Wrapper });
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
     });
     expect(result.current.providers).toEqual([PROVIDER]);
-    expect(result.current.defaultModel).toEqual({
-      modelId: "m1",
-      providerId: "p1",
-    });
     expect(result.current.error).toBeNull();
     expect(queryClient.getQueryData(providersKeys.all)).toEqual(payload);
   });
@@ -173,6 +179,44 @@ describe("provider queries", () => {
       expect(result.current.error?.code).toBe("db");
     });
     expect(result.current.isLoading).toBe(false);
+  });
+});
+
+describe("provider presets", () => {
+  it("fills the presets cache under its own key", async () => {
+    listProviderPresetsMock.mockResolvedValue([PRESET]);
+    const { result } = renderHook(() => useProviderPresets(), {
+      wrapper: Wrapper,
+    });
+    await waitFor(() => {
+      expect(result.current.presets).toEqual([PRESET]);
+    });
+    expect(queryClient.getQueryData(providerPresetsKeys.all)).toEqual([PRESET]);
+    expect(result.current.error).toBeNull();
+    expect(queryClient.getQueryData(providersKeys.all)).toBeUndefined();
+  });
+
+  it("surfaces the AppError of a failed read and retries", async () => {
+    listProviderPresetsMock
+      .mockRejectedValueOnce(READ_ERROR)
+      .mockResolvedValueOnce([PRESET]);
+    const { result } = renderHook(() => useProviderPresets(), {
+      wrapper: Wrapper,
+    });
+    await waitFor(() => {
+      expect(result.current.error?.code).toBe("db");
+    });
+    expect(result.current.presets).toEqual([]);
+
+    await act(async () => {
+      result.current.retry();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(result.current.presets).toEqual([PRESET]);
+    });
+    expect(result.current.error).toBeNull();
   });
 });
 
@@ -235,43 +279,6 @@ describe("provider write invalidations", () => {
     );
     expect(isInvalidated(providersKeys.all)).toBe(true);
     expect(isInvalidated(unifiedModelsKeys.all)).toBe(true);
-  });
-
-  it("set default invalidates only the provider list", async () => {
-    seedCaches();
-    setDefaultModelMock.mockResolvedValue(undefined);
-    const { result } = renderHook(() => useSetDefaultModel(), {
-      wrapper: Wrapper,
-    });
-    await act(async () => {
-      await result.current.mutateAsync({ modelId: "m1", providerId: "p1" });
-    });
-    expect(setDefaultModelMock).toHaveBeenCalledWith(
-      {
-        modelId: "m1",
-        providerId: "p1",
-      },
-      expect.anything(),
-    );
-    expect(isInvalidated(providersKeys.all)).toBe(true);
-    expect(isInvalidated(unifiedModelsKeys.all)).toBe(false);
-  });
-
-  it("clear default invalidates only the provider list", async () => {
-    seedCaches();
-    clearDefaultModelMock.mockResolvedValue(undefined);
-    const { result } = renderHook(() => useClearDefaultModel(), {
-      wrapper: Wrapper,
-    });
-    await act(async () => {
-      await result.current.mutateAsync();
-    });
-    expect(clearDefaultModelMock).toHaveBeenCalledWith(
-      undefined,
-      expect.anything(),
-    );
-    expect(isInvalidated(providersKeys.all)).toBe(true);
-    expect(isInvalidated(unifiedModelsKeys.all)).toBe(false);
   });
 });
 

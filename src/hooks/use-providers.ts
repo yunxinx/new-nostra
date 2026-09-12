@@ -9,16 +9,15 @@ import {
 
 import type {
   AppError,
-  DefaultModel,
   Provider,
   ProviderListItem,
+  ProviderPreset,
   Providers,
   UnifiedModel,
   UnifiedModelListItem,
 } from "@/types/ipc";
 
 import {
-  clearDefaultModel,
   createProvider,
   type CreateProviderParams,
   createUnifiedModel,
@@ -27,20 +26,27 @@ import {
   type DeleteProviderParams,
   deleteUnifiedModel,
   type DeleteUnifiedModelParams,
+  listProviderPresets,
   listProviders,
   listUnifiedModels,
-  setDefaultModel,
-  type SetDefaultModelParams,
   updateProvider,
   type UpdateProviderParams,
   updateUnifiedModel,
   type UpdateUnifiedModelParams,
 } from "@/lib/ipc/providers";
-import { providersKeys, unifiedModelsKeys } from "@/lib/query-keys";
+import {
+  providerPresetsKeys,
+  providersKeys,
+  unifiedModelsKeys,
+} from "@/lib/query-keys";
+
+interface ProviderPresetsResult {
+  error: AppError | null;
+  presets: ProviderPreset[];
+  retry: () => void;
+}
 
 interface ProvidersResult {
-  /** Null while no default is set. */
-  defaultModel: DefaultModel | null;
   error: AppError | null;
   isLoading: boolean;
   providers: ProviderListItem[];
@@ -52,18 +58,6 @@ interface UnifiedModelsResult {
   isLoading: boolean;
   retry: () => void;
   unifiedModels: UnifiedModelListItem[];
-}
-
-export function useClearDefaultModel() {
-  const queryClient = useQueryClient();
-  return useVoidProviderMutation({
-    mutationFn: clearDefaultModel,
-    networkMode: "always",
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: providersKeys.all });
-    },
-    retry: false,
-  });
 }
 
 export function useCreateProvider() {
@@ -118,6 +112,24 @@ export function useDeleteUnifiedModel() {
   });
 }
 
+/**
+ * The built-in vendor presets, read once per session: they are app-version
+ * constants, so no write can invalidate them.
+ */
+export function useProviderPresets(): ProviderPresetsResult {
+  const query = useQuery<ProviderPreset[], AppError>({
+    networkMode: "always",
+    queryFn: listProviderPresets,
+    queryKey: providerPresetsKeys.all,
+    staleTime: Infinity,
+  });
+  return {
+    error: query.error ?? null,
+    presets: query.data ?? [],
+    retry: () => void query.refetch(),
+  };
+}
+
 export function useProviders(): ProvidersResult {
   const query = useQuery<Providers, AppError>({
     networkMode: "always",
@@ -126,24 +138,11 @@ export function useProviders(): ProvidersResult {
     staleTime: Infinity,
   });
   return {
-    defaultModel: query.data?.defaultModel ?? null,
     error: query.error ?? null,
     isLoading: query.isLoading,
     providers: query.data?.providers ?? [],
     retry: () => void query.refetch(),
   };
-}
-
-export function useSetDefaultModel() {
-  const queryClient = useQueryClient();
-  return useVoidProviderMutation<SetDefaultModelParams>({
-    mutationFn: setDefaultModel,
-    networkMode: "always",
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: providersKeys.all });
-    },
-    retry: false,
-  });
 }
 
 export function useUnifiedModels(): UnifiedModelsResult {

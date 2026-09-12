@@ -5,7 +5,6 @@ import { unifiedModelDraftSchema } from "./unified";
 describe("unifiedModelDraftSchema", () => {
   it("accepts ordered members and keeps their order", () => {
     const parsed = unifiedModelDraftSchema.parse({
-      hide: true,
       id: "claude",
       members: [
         { model: "m2", providerId: "p2" },
@@ -18,7 +17,7 @@ describe("unifiedModelDraftSchema", () => {
     ]);
   });
 
-  it("ignores unknown keys and defaults a missing hide flag", () => {
+  it("ignores unknown keys", () => {
     const parsed = unifiedModelDraftSchema.safeParse({
       extra: 1,
       id: "claude",
@@ -49,14 +48,6 @@ describe("unifiedModelDraftSchema", () => {
           { model: "m1", providerId: "p1" },
           { model: "m1", providerId: "p1" },
         ],
-      },
-    ],
-    [
-      "a null hide flag",
-      {
-        hide: null,
-        id: "claude",
-        members: [{ model: "m1", providerId: "p1" }],
       },
     ],
     ["a null member list", { id: "claude", members: null }],

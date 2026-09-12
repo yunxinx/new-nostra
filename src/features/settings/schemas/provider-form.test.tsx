@@ -8,7 +8,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { Controller, useForm } from "react-hook-form";
+import { useForm } from "react-hook-form";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -18,7 +18,7 @@ import { providerDraftSchema } from "./provider";
 
 // Minimal react-hook-form wiring over the real draft schema: a trimmed field
 // surface that still exercises the three shapes the settings subpages rely on —
-// hyphenated compat keys, a protocol checkbox set and a comma-separated alias
+// hyphenated compat keys and a protocol checkbox set
 // input. The useForm generics are part of the check: a mirror-shaped draft must
 // be accepted as form values, and the resolver must hand back parsed drafts.
 
@@ -33,7 +33,7 @@ const DRAFT: ProviderDraft = {
   compat: { "openai-completions": { supportsStore: false } },
   enabled: true,
   maxRetries: 2,
-  models: [{ aliases: [], apis: [], id: "deepseek-chat", reasoning: true }],
+  models: [{ apis: [], id: "deepseek-chat", reasoning: true }],
   name: "Gateway",
   reasoningOutput: "auto",
   requestTimeoutMs: 120000,
@@ -46,7 +46,7 @@ interface DraftFormProps {
 }
 
 function DraftForm({ onInvalid, onValid }: DraftFormProps) {
-  const { control, handleSubmit, register } = useForm<
+  const { handleSubmit, register } = useForm<
     DraftFormValues,
     unknown,
     DraftSubmission
@@ -94,22 +94,6 @@ function DraftForm({ onInvalid, onValid }: DraftFormProps) {
           {...register("models.0.apis")}
         />
       </label>
-      <Controller
-        control={control}
-        name="models.0.aliases"
-        render={({ field }) => (
-          <label>
-            aliases
-            <input
-              onBlur={field.onBlur}
-              onChange={(event) => {
-                field.onChange(splitAliases(event.target.value));
-              }}
-              value={Array.isArray(field.value) ? field.value.join(", ") : ""}
-            />
-          </label>
-        )}
-      />
       <button type="submit">Save</button>
     </form>
   );
@@ -120,14 +104,6 @@ function renderDraftForm() {
   const onValid = vi.fn<(draft: DraftSubmission) => void>();
   render(<DraftForm onInvalid={onInvalid} onValid={onValid} />);
   return { onInvalid, onValid };
-}
-
-/** Comma-separated alias text; the submitted value stays a string array. */
-function splitAliases(value: string): string[] {
-  return value
-    .split(",")
-    .map((alias) => alias.trim())
-    .filter((alias) => alias !== "");
 }
 
 async function submitInvalid(
@@ -148,7 +124,7 @@ async function submitInvalid(
 afterEach(cleanup);
 
 describe("provider draft form", () => {
-  it("submits parsed values for hyphenated compat keys, protocol boxes and comma aliases", async () => {
+  it("submits parsed values for hyphenated compat keys and protocol boxes", async () => {
     const { onInvalid, onValid } = renderDraftForm();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "supportsStore" }));
@@ -157,9 +133,6 @@ describe("provider draft form", () => {
     );
     fireEvent.change(screen.getByRole("combobox", { name: "maxTokensField" }), {
       target: { value: "max_tokens" },
-    });
-    fireEvent.change(screen.getByRole("textbox", { name: "aliases" }), {
-      target: { value: "chat, quick" },
     });
     fireEvent.submit(screen.getByRole("button", { name: "Save" }));
 
@@ -176,7 +149,6 @@ describe("provider draft form", () => {
       supportsStore: true,
     });
     expect(draft?.models?.[0]?.apis).toEqual(["openai-completions"]);
-    expect(draft?.models?.[0]?.aliases).toEqual(["chat", "quick"]);
   });
 
   it("rejects an unset enum select at its hyphenated compat path", async () => {
@@ -185,23 +157,5 @@ describe("provider draft form", () => {
     expect(
       errors.compat?.["openai-completions"]?.maxTokensField?.message,
     ).toBeTypeOf("string");
-  });
-
-  it("rejects an alias that shadows a model id at the aliases path", async () => {
-    const errors = await submitInvalid(() => {
-      fireEvent.change(
-        screen.getByRole("combobox", { name: "maxTokensField" }),
-        {
-          target: { value: "max_tokens" },
-        },
-      );
-      fireEvent.change(screen.getByRole("textbox", { name: "aliases" }), {
-        target: { value: "deepseek-chat" },
-      });
-    });
-
-    expect(errors.models?.[0]?.aliases?.message).toBe(
-      "alias `deepseek-chat` is also a model id",
-    );
   });
 });

@@ -132,15 +132,6 @@ export interface CreatedSession {
 }
 
 /**
- * Mirrors src-tauri/src/commands/providers.rs DefaultModelDto: the single
- * default-model reference, null while none is set.
- */
-export interface DefaultModel {
-  modelId: string;
-  providerId: string;
-}
-
-/**
  * Mirrors src-tauri/src/commands/sessions.rs EntryDto: a message tree node.
  * `parentId` is null for roots and immutable after write; `role` comes from the
  * stored payload; `type` is "message" in M1.
@@ -209,12 +200,10 @@ export interface ModelCostTier {
 }
 
 /**
- * Mirrors src-tauri/src/types.rs ModelEntry: `id` is the upstream request name;
- * `apis` is the checked protocol set (array order is check order) and `aliases`
- * are the downstream reference names rewritten to `id` on the way out.
+ * Mirrors src-tauri/src/types.rs ModelEntry: `id` is the upstream request name,
+ * `apis` the checked protocol set (array order is check order).
  */
 export interface ModelEntry {
-  aliases?: string[];
   apis?: Protocol[];
   baseUrl?: string;
   compat?: CompatBuckets;
@@ -336,6 +325,11 @@ export interface Provider {
   streamIdleTimeoutMs: number;
 }
 
+/** Mirrors commands/providers.rs ProviderCatalogChanged; e.g. { scope: "catalog" }. Contains no configuration values. */
+export interface ProviderCatalogChanged {
+  scope: "catalog";
+}
+
 /**
  * Mirrors src-tauri/src/commands/providers.rs ProviderDraft: the create/update
  * submission shape, the provider configuration with no `id` of its own. A
@@ -367,11 +361,9 @@ export interface ProviderPreset {
 
 /**
  * Mirrors src-tauri/src/commands/providers.rs ProvidersDto: every stored
- * provider in creation order plus the default-model reference, null while none
- * is set.
+ * provider in creation order.
  */
 export interface Providers {
-  defaultModel: DefaultModel | null;
   providers: ProviderListItem[];
 }
 
@@ -496,11 +488,9 @@ export interface UnifiedMember {
 
 /**
  * Mirrors src-tauri/src/types.rs UnifiedModel: a cross-provider aggregate name;
- * members are in attempt order and `hide` suppresses the member models as
- * standalone entries.
+ * members are in attempt order and the name is independent of provider models.
  */
 export interface UnifiedModel {
-  hide: boolean;
   id: string;
   members?: UnifiedMember[];
 }

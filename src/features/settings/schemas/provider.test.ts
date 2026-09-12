@@ -49,6 +49,7 @@ describe("providerDraftSchema", () => {
     "  https://api.example.com/v1/  ",
     "https://api.example.com",
     "http://localhost:11434/v1",
+    "http://[::1]:11434/v1",
     "HTTPS://API.example.com/V1",
   ])("accepts the base URL %j", (baseUrl) => {
     expect(providerDraftSchema.safeParse(draftWith({ baseUrl })).success).toBe(
@@ -67,6 +68,9 @@ describe("providerDraftSchema", () => {
     ["ftp://api.example.com", "non-http scheme"],
     ["https://", "no host"],
     ["https://:8080/v1", "host-less authority"],
+    ["https://api.example.com:99999/v1", "out-of-range port"],
+    ["https://api.example.com:abc/v1", "non-numeric port"],
+    ["http://[not-ipv6]/v1", "invalid IPv6 address"],
     ["https://api example.com/v1", "embedded whitespace"],
     ["https://api.example.com/v1?key=1", "query"],
     ["https://api.example.com/v1#top", "fragment"],
@@ -172,59 +176,6 @@ describe("providerDraftSchema", () => {
     ).toBe(true);
   });
 
-  it("keeps aliases unique and never shadowing a model id", () => {
-    // A model id and its consumer-facing alias are different kinds of name.
-    expect(
-      providerDraftSchema.safeParse(draftWithModel({ aliases: ["m1"] }))
-        .success,
-    ).toBe(false);
-    expect(
-      providerDraftSchema.safeParse(
-        draftWith({ models: [{ id: "m1" }, { aliases: ["m1"], id: "m2" }] }),
-      ).success,
-    ).toBe(false);
-    expect(
-      providerDraftSchema.safeParse(
-        draftWith({ models: [{ id: "m1" }, { aliases: [" m1 "], id: "m2" }] }),
-      ).success,
-    ).toBe(false);
-    expect(
-      providerDraftSchema.safeParse(
-        draftWith({
-          models: [
-            { aliases: ["shared"], id: "m1" },
-            { aliases: [" shared "], id: "m2" },
-          ],
-        }),
-      ).success,
-    ).toBe(false);
-    expect(
-      providerDraftSchema.safeParse(
-        draftWith({ models: [{ aliases: ["  "], id: "m1" }] }),
-      ).success,
-    ).toBe(false);
-    // Aliases of one provider are independent names: distinct values pass, and
-    // an alias may repeat another model's display name.
-    expect(
-      providerDraftSchema.safeParse(
-        draftWith({
-          models: [
-            {
-              aliases: ["short", "shorter"],
-              id: "m1",
-              name: "Shared Display",
-            },
-            {
-              aliases: ["Shared Display"],
-              id: "m2",
-              name: "Shared Display Two",
-            },
-          ],
-        }),
-      ).success,
-    ).toBe(true);
-  });
-
   it("rejects unknown model shapes and zero limits", () => {
     expect(
       providerDraftSchema.safeParse(draftWithModel({ input: [] })).success,
@@ -323,7 +274,6 @@ describe("providerDraftSchema", () => {
   });
 
   it.each([
-    ["aliases", null],
     ["apis", null],
     ["reasoning", null],
     ["input", null],
@@ -350,11 +300,16 @@ describe("providerDraftSchema", () => {
     ).toEqual([["models", 1, "id"]]);
 
     const shadowed = providerDraftSchema.safeParse(
-      draftWithModel({ aliases: ["m1"] }),
+      draftWith({
+        models: [
+          { id: "m1", name: "Same" },
+          { id: "m2", name: "Same" },
+        ],
+      }),
     );
     expect(
       shadowed.success ? [] : shadowed.error.issues.map((issue) => issue.path),
-    ).toEqual([["models", 0, "aliases"]]);
+    ).toEqual([["models", 1, "name"]]);
   });
 
   it("reports a nested cost violation at its own path", () => {
@@ -387,7 +342,6 @@ describe("providerDraftSchema", () => {
       maxRetries: 3,
       models: [
         {
-          aliases: ["gpt"],
           apis: ["openai-responses"],
           contextWindow: 200_000,
           id: "openai/gpt-5.2",
@@ -409,7 +363,6 @@ describe("providerDraftSchema", () => {
 describe("modelEntrySchema", () => {
   it("carries a fully populated row unchanged", () => {
     const model = {
-      aliases: ["gpt"],
       apis: ["openai-completions", "openai-responses"],
       baseUrl: "https://models.example.com/v1",
       compat: { "anthropic-messages": { supportsTemperature: false } },
