@@ -5,7 +5,7 @@ src-tauri/target
 src-tauri/gen
 src-tauri/icons
 
-# Local-only directories excluded from git via .git/info/exclude; they are
+# Local-only paths excluded from git via .git/info/exclude; they are
 # not deliverables and must not participate in format gating.
 .trellis
 .claude
@@ -17,3 +17,8 @@ src-tauri/icons
 .qoder
 .zcode
 myNotes
+.mcp.json
+
+# Playwright MCP run artifacts; the plugin's own .gitignore keeps them out
+# of git, and they are not deliverables.
+.playwright-mcp
