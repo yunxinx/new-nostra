@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -127,6 +128,19 @@ function bodyRows(): Array<Array<null | string>> {
     .map((row) =>
       Array.from(row.querySelectorAll("td")).map((cell) => cell.textContent),
     );
+}
+
+/**
+ * The candidate row a checkbox with this accessible name sits in. The box
+ * swallows its own click before it reaches the row, so a test aiming at the
+ * row's own target has to click the row itself.
+ */
+function candidateRow(name: string): HTMLTableRowElement {
+  const row = screen.getByRole("checkbox", { name }).closest("tr");
+  if (row === null) {
+    throw new Error(`No candidate row for ${name}`);
+  }
+  return row;
 }
 
 /**
@@ -361,6 +375,64 @@ describe("unified model editor", () => {
       screen.getByRole("button", { name: "New unified model" }),
     ).toBeTruthy();
     expect(updateUnifiedModelMock).not.toHaveBeenCalled();
+  });
+
+  it("freezes the candidate rows while a save is in flight", async () => {
+    let refuseSave: () => void = () => undefined;
+    const pending = new Promise<UnifiedModel>((_resolve, reject) => {
+      refuseSave = () =>
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the command rejects with the serialized AppError; falls away when the mock signature types its rejections.
+        reject({ code: "network", message: "offline" });
+    });
+    updateUnifiedModelMock.mockReturnValue(pending);
+    await renderPage([STORED], "fast");
+    fireEvent.click(screen.getByRole("button", { name: "Edit unified model" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "renamed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(updateUnifiedModelMock).toHaveBeenCalledTimes(1);
+    });
+
+    const row = candidateRow("Gateway · gpt-4o");
+    expect(row.getAttribute("aria-disabled")).toBe("true");
+    expect(row.className).toContain("hover:bg-transparent");
+    expect(row.className).not.toContain("cursor-pointer");
+    // The checkbox rides on the fieldset's own disabled state: the row guard
+    // covers what the fieldset cannot reach.
+    expect(row.closest("fieldset")).toHaveProperty("disabled", true);
+    fireEvent.click(row);
+    // A click that cannot reach the draft moves neither the order on screen
+    // nor the members the save already captured.
+    expect(orderedMembers()).toHaveLength(2);
+    expect(updateUnifiedModelMock).toHaveBeenCalledWith(
+      {
+        id: "fast",
+        unified: {
+          id: "renamed",
+          members: [
+            { model: "gpt-4o-mini", providerId: "p1" },
+            { model: "claude-sonnet", providerId: "p2" },
+          ],
+        },
+      },
+      expect.anything(),
+    );
+
+    await act(async () => {
+      refuseSave();
+      await pending.catch(() => undefined);
+    });
+    await screen.findByText("Network error");
+    await waitFor(() => {
+      expect(row.getAttribute("aria-disabled")).toBeNull();
+    });
+    expect(row.className).toContain("cursor-pointer");
+
+    fireEvent.click(row);
+    expect(orderedMembers()).toHaveLength(3);
+    expect(orderedMembers()[2]).toContain("gpt-4oGateway");
   });
 });
 

@@ -1,5 +1,6 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 
+import { cn } from "cn";
 import {
   ChevronDown,
   ChevronLeft,
@@ -351,6 +352,7 @@ export function UnifiedModelEditor({
                 {sections.map(({ provider, rows: group }) => (
                   <CandidateGroup
                     group={group}
+                    isDisabled={isSaving}
                     key={provider.id}
                     members={members}
                     onToggle={toggleMember}
@@ -424,11 +426,13 @@ export function UnifiedModelEditor({
 
 function CandidateGroup({
   group,
+  isDisabled,
   members,
   onToggle,
   providerName,
 }: {
   group: AggregateRow[];
+  isDisabled: boolean;
   members: UnifiedMember[];
   onToggle: (member: UnifiedMember) => void;
   providerName: string;
@@ -451,9 +455,18 @@ function CandidateGroup({
           // reaching the row, or one click would toggle the member twice and
           // cancel itself out.
           <TableRow
-            className="hover:bg-muted cursor-pointer"
+            aria-disabled={isDisabled || undefined}
+            // The fieldset disables the checkbox, not the row. A frozen row
+            // drops its own hover tint and pointer cursor so it cannot read as
+            // clickable; the disabled pair must be spelled out because the
+            // table's base row carries `hover:bg-muted/50` of its own, and
+            // tailwind-merge resolves that conflict in favor of the later one.
+            className={cn(
+              "hover:bg-muted cursor-pointer",
+              isDisabled && "cursor-default hover:bg-transparent",
+            )}
             key={memberKey(member)}
-            onClick={() => onToggle(member)}
+            onClick={isDisabled ? undefined : () => onToggle(member)}
           >
             <TableCell className="p-1 pl-2">
               <Checkbox
