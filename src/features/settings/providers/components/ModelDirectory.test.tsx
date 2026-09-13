@@ -7,6 +7,7 @@ import {
   screen,
   within,
 } from "@testing-library/react";
+import { useRef, useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { ModelEntry } from "@/types/ipc";
@@ -14,7 +15,11 @@ import type { ModelEntry } from "@/types/ipc";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { initI18n } from "@/lib/i18n";
 
-import { type ModelDraftRow, modelDraftRows } from "../model-draft";
+import {
+  changedModelCount,
+  type ModelDraftRow,
+  modelDraftRows,
+} from "../model-draft";
 import { ModelDirectory } from "./ModelDirectory";
 
 beforeAll(initI18n);
@@ -32,8 +37,8 @@ const MODELS: ModelEntry[] = [
 ];
 
 interface Harness {
-  modelRows: ModelDraftRow[];
-  onModelsChange: Mock<(models: ModelEntry[]) => void>;
+  initialRows: ModelDraftRow[];
+  onModelsChange: Mock<(models: ModelEntry[], rows: ModelDraftRow[]) => void>;
   onOpenModel: Mock<(index: number) => void>;
 }
 
@@ -47,6 +52,49 @@ function bodyRows(): Array<Array<null | string>> {
     );
 }
 
+/** The changed count the draft derives from the rows it was last handed. */
+function changedModels(harness: Harness): number {
+  return writtenRows(harness).reduce(
+    (count, row) =>
+      count +
+      (row.baseline === undefined
+        ? 1
+        : changedModelCount(row.baseline, row.model, row.editor)),
+    0,
+  );
+}
+
+/**
+ * The directory's host. Every write is rendered back into the component, the
+ * way the draft controller renders it: without that, an assertion about an
+ * edit surviving a re-render would be about the harness rather than the
+ * component.
+ */
+function DirectoryHost({ harness }: { harness: Harness }) {
+  const [rows, setRows] = useState(harness.initialRows);
+  // The rows of the write being handled: React has not re-rendered yet when
+  // the same handler goes on to open a row.
+  const written = useRef(rows);
+  return (
+    <ModelDirectory
+      api="openai-completions"
+      errors={undefined}
+      modelRows={rows}
+      onModelsChange={(next) => {
+        written.current = next;
+        setRows(next);
+        harness.onModelsChange(
+          next.map((row) => row.model),
+          next,
+        );
+      }}
+      onOpenModel={(key) =>
+        harness.onOpenModel(written.current.findIndex((row) => row.key === key))
+      }
+    />
+  );
+}
+
 /** The remove button of one row, which acts at once with no menu in between. */
 function removeRow(row: number): void {
   const buttons = screen.getAllByRole("button", { name: /^Remove model / });
@@ -55,29 +103,52 @@ function removeRow(row: number): void {
 
 function renderDirectory(models: ModelEntry[] = MODELS): Harness {
   const harness: Harness = {
-    modelRows: modelDraftRows(models),
-    onModelsChange: vi.fn<(models: ModelEntry[]) => void>(),
+    initialRows: modelDraftRows(models),
+    onModelsChange:
+      vi.fn<(models: ModelEntry[], rows: ModelDraftRow[]) => void>(),
     onOpenModel: vi.fn<(index: number) => void>(),
   };
   render(
     <TooltipProvider>
-      <ModelDirectory
-        api="openai-completions"
-        errors={undefined}
-        modelRows={harness.modelRows}
-        onModelsChange={(rows) => {
-          harness.modelRows = rows;
-          harness.onModelsChange(rows.map((row) => row.model));
-        }}
-        onOpenModel={(key) =>
-          harness.onOpenModel(
-            harness.modelRows.findIndex((row) => row.key === key),
-          )
-        }
-      />
+      <DirectoryHost harness={harness} />
     </TooltipProvider>,
   );
   return harness;
+}
+
+/**
+ * A host that swaps the directory out the way the section strip does, keeping
+ * the rows it wrote in state above the unmounted pane.
+ */
+function SwappingHost() {
+  const [rows, setRows] = useState<ModelDraftRow[]>(() =>
+    modelDraftRows([{ id: "m1", name: "Alpha", reasoning: false }]),
+  );
+  const [isModelsPane, setIsModelsPane] = useState(true);
+  return (
+    <div>
+      <button onClick={() => setIsModelsPane(true)} type="button">
+        Show models
+      </button>
+      <button onClick={() => setIsModelsPane(false)} type="button">
+        Show general
+      </button>
+      {isModelsPane && (
+        <ModelDirectory
+          api="openai-completions"
+          errors={undefined}
+          modelRows={rows}
+          onModelsChange={setRows}
+          onOpenModel={() => undefined}
+        />
+      )}
+    </div>
+  );
+}
+
+/** The rows the directory handed the draft in its latest write. */
+function writtenRows(harness: Harness): ModelDraftRow[] {
+  return harness.onModelsChange.mock.calls.at(-1)?.[1] ?? [];
 }
 
 describe("model directory layout", () => {
@@ -300,7 +371,7 @@ describe("model directory inline edits", () => {
     { isComposing: true, keyCode: 13 },
     { isComposing: false, keyCode: 229 },
   ])("keeps IME confirmation inside the input (%j)", (composition) => {
-    const { onModelsChange } = renderDirectory();
+    const harness = renderDirectory();
     fireEvent.click(
       screen.getByRole("button", { name: "Display name · gpt-4o" }),
     );
@@ -308,13 +379,19 @@ describe("model directory inline edits", () => {
       name: "Display name · gpt-4o",
     });
     fireEvent.change(input, { target: { value: "中文" } });
+    const writes = harness.onModelsChange.mock.calls.length;
     fireEvent.keyDown(input, { key: "Enter", ...composition });
-    expect(onModelsChange).not.toHaveBeenCalled();
+    // The composition's Enter neither ends the edit nor writes again: the
+    // text reached the draft with the keystroke.
+    expect(harness.onModelsChange.mock.calls).toHaveLength(writes);
     expect(screen.getByRole("textbox", { name: "Display name · gpt-4o" })).toBe(
       input,
     );
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(onModelsChange.mock.calls.at(-1)?.[0][0]?.name).toBe("中文");
+    expect(
+      screen.queryByRole("textbox", { name: "Display name · gpt-4o" }),
+    ).toBeNull();
+    expect(writtenRows(harness)[0]?.model.name).toBe("中文");
   });
 
   /** Opens a naming cell and returns its editor. */
@@ -323,18 +400,41 @@ describe("model directory inline edits", () => {
     return screen.getByRole("textbox", { name });
   }
 
-  it("writes the display name the cell was given", () => {
+  it("writes every keystroke, so the cell holds no text of its own", () => {
     const harness = renderDirectory();
     const box = openCell("Display name · gpt-4o");
 
-    fireEvent.change(box, { target: { value: "GPT-4o mini" } });
-    fireEvent.keyDown(box, { key: "Enter" });
+    fireEvent.change(box, { target: { value: "G" } });
+    expect(writtenRows(harness)[0]?.model.name).toBe("G");
+    expect(changedModels(harness)).toBe(1);
 
-    const next = harness.onModelsChange.mock.calls[0]?.[0];
-    expect(next?.[0]?.name).toBe("GPT-4o mini");
+    fireEvent.change(box, { target: { value: "GP" } });
+    expect(writtenRows(harness)[0]?.model.name).toBe("GP");
+    expect(changedModels(harness)).toBe(1);
+
+    // Typing the stored name back clears the change: the count follows the
+    // value, not the fact that the cell was opened.
+    fireEvent.change(box, { target: { value: "GPT-4o" } });
+    expect(changedModels(harness)).toBe(0);
     // The other rows are carried through untouched.
-    expect(next?.[1]).toBe(MODELS[1]);
-    expect(next?.[2]).toBe(MODELS[2]);
+    expect(writtenRows(harness)[1]?.model).toBe(MODELS[1]);
+    expect(writtenRows(harness)[2]?.model).toBe(MODELS[2]);
+  });
+
+  it("keeps the caret in the input the keystrokes are written from", () => {
+    renderDirectory();
+    const box = openCell("Display name · gpt-4o");
+    expect(document.activeElement).toBe(box);
+
+    fireEvent.change(box, { target: { value: "GP" } });
+
+    // The re-render that follows a write has to update this input rather than
+    // mount a new one; a new element would leave the caret behind.
+    expect(screen.getByRole("textbox", { name: "Display name · gpt-4o" })).toBe(
+      box,
+    );
+    expect(document.activeElement).toBe(box);
+    expect(box).toHaveProperty("value", "GP");
   });
 
   it("clears the display name when the cell is emptied", () => {
@@ -342,38 +442,133 @@ describe("model directory inline edits", () => {
     const box = openCell("Display name · gpt-4o");
 
     fireEvent.change(box, { target: { value: "" } });
-    fireEvent.keyDown(box, { key: "Enter" });
 
-    expect(
-      harness.onModelsChange.mock.calls[0]?.[0]?.[0]?.name,
-    ).toBeUndefined();
+    // Blank text is the key's absence, not an empty string.
+    expect(writtenRows(harness)[0]?.model).toEqual({
+      apis: ["openai-completions"],
+      id: "gpt-4o",
+      reasoning: false,
+    });
   });
 
-  it("commits on blur", () => {
+  it("leaves the cell on Enter and on blur with nothing left to write", () => {
     const harness = renderDirectory();
-    const box = openCell("Display name · claude-sonnet");
+    const entered = openCell("Display name · claude-sonnet");
 
-    fireEvent.change(box, { target: { value: "Sonnet" } });
-    fireEvent.blur(box);
+    fireEvent.change(entered, { target: { value: "Sonnet" } });
+    const writes = harness.onModelsChange.mock.calls.length;
+    fireEvent.keyDown(entered, { key: "Enter" });
 
-    expect(harness.onModelsChange.mock.calls[0]?.[0]?.[1]?.name).toBe("Sonnet");
+    // The Enter only ends the edit; the name has been in the draft since the
+    // keystroke.
+    expect(harness.onModelsChange.mock.calls).toHaveLength(writes);
+    expect(
+      screen.queryByRole("textbox", { name: "Display name · claude-sonnet" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Display name · claude-sonnet" })
+        .textContent,
+    ).toBe("Sonnet");
+
+    const blurred = openCell("Display name · gpt-4o");
+    fireEvent.change(blurred, { target: { value: "Four" } });
+    const afterChange = harness.onModelsChange.mock.calls.length;
+    fireEvent.blur(blurred);
+
+    expect(harness.onModelsChange.mock.calls).toHaveLength(afterChange);
+    expect(
+      screen.getByRole("button", { name: "Display name · gpt-4o" }).textContent,
+    ).toBe("Four");
   });
 
-  it("reverts on Escape and leaves an unchanged cell alone", () => {
+  it("puts the snapshot back on Escape and leaves an untouched cell alone", () => {
     const harness = renderDirectory();
 
     const escaped = openCell("Display name · gpt-4o");
     fireEvent.change(escaped, { target: { value: "Discarded" } });
     fireEvent.keyDown(escaped, { key: "Escape" });
-    expect(harness.onModelsChange).not.toHaveBeenCalled();
+
+    // Escape writes the value the edit started from: the draft ends where it
+    // began, not on the half-typed name.
+    expect(writtenRows(harness)[0]?.model.name).toBe("GPT-4o");
+    expect(changedModels(harness)).toBe(0);
     // The cell is back to its text, so it can be opened again.
     expect(
       screen.getByRole("button", { name: "Display name · gpt-4o" }).textContent,
     ).toBe("GPT-4o");
 
-    const unchanged = openCell("Display name · gpt-4o");
-    fireEvent.blur(unchanged);
-    expect(harness.onModelsChange).not.toHaveBeenCalled();
+    const writes = harness.onModelsChange.mock.calls.length;
+    fireEvent.blur(openCell("Display name · gpt-4o"));
+    // Opening a cell and leaving it without typing writes nothing at all.
+    expect(harness.onModelsChange.mock.calls).toHaveLength(writes);
+  });
+
+  it("keeps the renaming row on screen while its name stops matching the filter", () => {
+    renderDirectory([
+      { id: "m1", name: "Alpha", reasoning: false },
+      { id: "m2", name: "Beta", reasoning: false },
+    ]);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search models" }), {
+      target: { value: "Alpha" },
+    });
+    expect(bodyRows()).toHaveLength(1);
+
+    const box = openCell("Display name · m1");
+    fireEvent.change(box, { target: { value: "Al" } });
+
+    // "m1 al" no longer matches "alpha", so the row stays only because it is
+    // the one being renamed — the input must not slide out from under the
+    // caret.
+    expect(screen.getByRole("textbox", { name: "Display name · m1" })).toBe(
+      box,
+    );
+    expect(bodyRows()).toHaveLength(1);
+
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(
+      screen.getByRole("button", { name: "Display name · m1" }).textContent,
+    ).toBe("Alpha");
+  });
+
+  it("hands the renamed row back to the filter once the edit ends", () => {
+    renderDirectory([
+      { id: "m1", name: "Alpha", reasoning: false },
+      { id: "m2", name: "Beta", reasoning: false },
+    ]);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search models" }), {
+      target: { value: "Alpha" },
+    });
+
+    const box = openCell("Display name · m1");
+    fireEvent.change(box, { target: { value: "Al" } });
+    fireEvent.blur(box);
+
+    // The edit is over, so the filter decides again and no row matches.
+    expect(screen.getByText("No model matches")).toBeTruthy();
+  });
+
+  it("keeps the typed name when the panes swap the directory out", () => {
+    render(
+      <TooltipProvider>
+        <SwappingHost />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Display name · m1" }));
+    const box = screen.getByRole("textbox", { name: "Display name · m1" });
+    fireEvent.change(box, { target: { value: "Al" } });
+
+    // A section switch unmounts the pane, input and all. The name went to the
+    // draft with the keystroke, so the pane that comes back shows it.
+    fireEvent.click(screen.getByRole("button", { name: "Show general" }));
+    expect(
+      screen.queryByRole("textbox", { name: "Display name · m1" }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show models" }));
+
+    expect(
+      screen.getByRole("button", { name: "Display name · m1" }).textContent,
+    ).toBe("Al");
   });
 });
 

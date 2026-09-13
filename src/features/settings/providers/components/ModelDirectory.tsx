@@ -1,5 +1,5 @@
 import { Pencil, Plus, Search, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ModelEntry, Protocol } from "@/types/ipc";
@@ -73,6 +73,20 @@ const COLUMNS = [
  */
 const MIN_WIDTH = 744;
 
+interface InlineTextCellProps {
+  ariaLabel: string;
+  /** Whether this cell is the one being edited right now. */
+  isEditing: boolean;
+  /** Every keystroke of the edit; the text is the draft itself. */
+  onChange: (text: string) => void;
+  /** Leaves the cell. The text is already written, so this only exits. */
+  onEndEdit: () => void;
+  /** Leaves the cell with the value the edit started from put back. */
+  onRevert: () => void;
+  onStartEdit: () => void;
+  value: string;
+}
+
 interface ModelDirectoryProps {
   /** The provider's default protocol: a new row pre-checks it. */
   api: Protocol;
@@ -100,6 +114,14 @@ export function ModelDirectory({
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [protocols, setProtocols] = useState<string[]>([]);
+  // The naming cell being edited, if any. The text itself lives in the row —
+  // every keystroke is written through `onModelsChange` — so an edit needs
+  // only the row it is on and the value it started from, which is the
+  // snapshot Escape restores.
+  const [editing, setEditing] = useState<null | {
+    key: string;
+    snapshot: string;
+  }>(null);
   const selection = useRowSelection();
 
   const models = modelRows.map((row) => row.model);
@@ -109,10 +131,14 @@ export function ModelDirectory({
   const rows = modelRows
     .map((row, index) => ({ ...row, index }))
     .filter(
-      ({ model }) =>
-        (query === "" || rowText(model).includes(query)) &&
-        (protocols.length === 0 ||
-          (model.apis ?? []).some((entry) => protocols.includes(entry))),
+      ({ key, model }) =>
+        // The row being renamed stays visible whatever the filter says: the
+        // search reads the display name, and that name is what is being
+        // typed, so the row must not slide out from under the caret.
+        key === editing?.key ||
+        ((query === "" || rowText(model).includes(query)) &&
+          (protocols.length === 0 ||
+            (model.apis ?? []).some((entry) => protocols.includes(entry)))),
     );
 
   const protocolOptions = useMemo(
@@ -162,6 +188,11 @@ export function ModelDirectory({
         position === index ? { ...entry, model: next } : entry,
       ),
     );
+  }
+
+  /** Writes one model's display name; blank text clears the key. */
+  function handleRename(index: number, model: ModelEntry, text: string): void {
+    handleReplace(index, withModelValue(model, "name", optionalText(text)));
   }
 
   function handleToggle(index: number, family: string): void {
@@ -326,11 +357,17 @@ export function ModelDirectory({
                 <TableCell className="min-w-0">
                   <InlineTextCell
                     ariaLabel={`${t("settings.providers.modelName")} · ${label}`}
-                    onCommit={(text) =>
-                      handleReplace(
-                        index,
-                        withModelValue(model, "name", optionalText(text)),
-                      )
+                    isEditing={editing?.key === key}
+                    onChange={(text) => handleRename(index, model, text)}
+                    onEndEdit={() => setEditing(null)}
+                    onRevert={() => {
+                      // Escape writes the snapshot the edit started from back
+                      // into the row before leaving the cell.
+                      handleRename(index, model, editing?.snapshot ?? "");
+                      setEditing(null);
+                    }}
+                    onStartEdit={() =>
+                      setEditing({ key, snapshot: model.name ?? "" })
                     }
                     value={model.name ?? ""}
                   />
@@ -445,39 +482,25 @@ export function ModelDirectory({
 }
 
 // A text cell that turns into its own input: clicking the text edits in
-// place, Enter or losing focus commits, Escape reverts. Committing unchanged
-// text is a no-op, so a stray click never marks the draft dirty.
+// place, Enter or losing focus leaves it, Escape puts the starting value back.
+// The text lives in the row rather than in here — `onChange` carries each
+// keystroke to it — so an edit survives everything that unmounts the cell,
+// from a section switch to a save re-rendering the table.
 function InlineTextCell({
   ariaLabel,
-  onCommit,
+  isEditing,
+  onChange,
+  onEndEdit,
+  onRevert,
+  onStartEdit,
   value,
-}: {
-  ariaLabel: string;
-  onCommit: (text: string) => void;
-  value: string;
-}) {
-  // Null while the cell shows text; the editing draft otherwise.
-  const [draft, setDraft] = useState<null | string>(null);
-  // Set by the keyboard exits: the blur that follows Enter or Escape must not
-  // commit a second time (and must not undo the Escape).
-  const exitedRef = useRef(false);
-
-  function commit(): void {
-    if (draft !== null && draft !== value) {
-      onCommit(draft);
-    }
-    setDraft(null);
-  }
-
-  if (draft === null) {
+}: InlineTextCellProps) {
+  if (!isEditing) {
     return (
       <button
         aria-label={ariaLabel}
         className="focus-visible:ring-ring/50 block w-full cursor-text truncate rounded-[4px] text-left outline-none focus-visible:ring-3"
-        onClick={() => {
-          exitedRef.current = false;
-          setDraft(value);
-        }}
+        onClick={onStartEdit}
         type="button"
       >
         {value === "" ? (
@@ -494,27 +517,21 @@ function InlineTextCell({
       aria-label={ariaLabel}
       autoFocus
       className="h-7 w-full"
-      onBlur={() => {
-        if (!exitedRef.current) {
-          commit();
-        }
-      }}
-      onChange={(event) => setDraft(event.target.value)}
+      onBlur={onEndEdit}
+      onChange={(event) => onChange(event.target.value)}
       onKeyDown={(event) => {
         if (isComposing(event.nativeEvent)) return;
         if (event.key === "Enter") {
+          // The cell's Enter is not the form's: it ends the edit, and the
+          // text is already stored, so nothing has to be submitted.
           event.preventDefault();
-          // The pending state and the re-keyed row drop this input on commit;
-          // mark the exit so the unmount cannot submit again.
-          exitedRef.current = true;
-          commit();
+          onEndEdit();
         } else if (event.key === "Escape") {
           event.stopPropagation();
-          exitedRef.current = true;
-          setDraft(null);
+          onRevert();
         }
       }}
-      value={draft}
+      value={value}
     />
   );
 }
