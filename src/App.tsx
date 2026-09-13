@@ -116,7 +116,7 @@ export function App() {
       <main className="flex min-w-0 flex-1 flex-col">
         {/* Reserved title row: drag surface behind the fixed controls; the
             sidebar paints its own reserved row in sidebar tokens. */}
-        <div className="h-[34px] shrink-0" data-tauri-drag-region />
+        <div className="h-8.5 shrink-0" data-tauri-drag-region />
         <section className="min-h-0 flex-1">
           {/* Selection identity is activeSessionId alone: a session stays
               selected even when its sidebar page is evicted or the list
@@ -139,7 +139,7 @@ export function App() {
         </section>
       </main>
       <div
-        className="fixed top-0 z-50 flex h-[34px] min-w-0 items-center pr-2 transition-[left] duration-220 ease-in-out motion-reduce:transition-none"
+        className="fixed top-0 z-50 flex h-8.5 min-w-0 items-center pr-2 transition-[left] duration-220 ease-in-out motion-reduce:transition-none"
         style={{
           left: sidebarCollapsed ? (isMacOs() ? 148 : 80) : sidebarWidth + 6,
         }}
