@@ -671,6 +671,7 @@ describe("degraded rows and list payloads", () => {
 describe("resolved compat mirror", () => {
   it("carries merged values with one source per field", () => {
     const resolved: ResolvedCompat = {
+      presetId: "deepseek",
       sources: {
         maxTokensField: "model",
         requiresToolResultName: "provider",
@@ -691,6 +692,9 @@ describe("resolved compat mirror", () => {
     );
     expect(resolved.sources.thinkingFormat).toBe("vendor");
     expect(resolved.values.thinkingFormat).toBe("deepseek");
+    expect(field(JSON.parse(JSON.stringify(resolved)), "presetId")).toBe(
+      "deepseek",
+    );
   });
 });
 

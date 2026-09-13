@@ -89,6 +89,7 @@ describe("providers IPC wrappers", () => {
 
   it("resolveCompat omits an absent model and pins the protocol", async () => {
     const resolved: ResolvedCompat = {
+      presetId: "openai",
       sources: { supportsStore: "familyDefault" },
       values: { supportsStore: true },
     };

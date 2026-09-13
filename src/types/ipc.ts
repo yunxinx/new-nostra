@@ -376,11 +376,12 @@ export type ReasoningOutputMode = "always" | "auto" | "off";
 
 /**
  * Mirrors src-tauri/src/provider/config.rs ResolvedCompat: the merged effective
- * compat of one protocol with the layer that supplied each field. `sources`
- * covers exactly the keys of `values`; an empty nested object counts as unset
- * and is dropped.
+ * compat of one protocol. `sources` covers exactly the keys of `values`;
+ * empty nested objects are unset and omitted.
  */
 export interface ResolvedCompat {
+  /** Detected vendor preset, e.g. "deepseek"; absent for an unknown target. */
+  presetId?: string;
   sources: Record<string, CompatSource>;
   values: Record<string, JsonValue>;
 }

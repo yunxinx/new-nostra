@@ -67,11 +67,9 @@ pub fn normalize_base_url(raw: &str) -> Result<String, AppError> {
     Ok(url.to_owned())
 }
 
-/// Validates a provider draft: everything checkable without the stored provider
-/// set. Model registration, provider name uniqueness and unified-model name
-/// collisions are checked by the command layer inside the write transaction.
-/// Base URLs are checked but not rewritten, so the caller stores the form
-/// `normalize_base_url` returns instead of the raw input.
+/// Validates provider fields without reading stored rows; invalid fields return `InvalidInput`.
+/// Stored-row constraints are checked under the command's connection guard.
+/// The caller must store URLs in the form returned by `normalize_base_url`.
 pub fn validate_provider(config: &ProviderConfig) -> Result<(), AppError> {
     if config.name.trim().is_empty() {
         return Err(invalid("provider name must not be blank"));
@@ -117,8 +115,8 @@ pub fn validate_provider(config: &ProviderConfig) -> Result<(), AppError> {
 }
 
 /// Validates a unified model draft: non-blank id, non-empty ordered members
-/// without duplicates. Whether each member pins a registered model is checked by
-/// the command layer inside the write transaction.
+/// without duplicates. Member registration is checked by the command layer
+/// under the connection guard before writing.
 pub fn validate_unified_model(unified: &UnifiedModel) -> Result<(), AppError> {
     if unified.id.trim().is_empty() {
         return Err(invalid("unified model id must not be blank"));
@@ -290,7 +288,11 @@ pub enum CompatSource {
 /// Effective compat of one protocol: the merged fields plus the layer that
 /// supplied each field. `sources` covers exactly the keys of `values`.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResolvedCompat {
+    /// Detected vendor preset, e.g. `"deepseek"`; absent for an unknown target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset_id: Option<&'static str>,
     /// Merged fields with family defaults applied; empty nested objects are
     /// dropped because an empty object means unset downstream.
     pub values: Map<String, Value>,
@@ -365,7 +367,7 @@ pub fn resolve_model(
 }
 
 /// Effective base URL of a request target: a non-blank model override wins over
-/// the provider URL. A blank override counts as unset, matching validation.
+/// the provider URL. Blank overrides in incomplete drafts count as unset.
 fn effective_base_url(provider: &ProviderConfig, model: &ModelEntry) -> String {
     match model.base_url.as_deref() {
         Some(url) if !url.trim().is_empty() => url.to_owned(),
@@ -421,7 +423,7 @@ pub fn resolve_compat(
     }
     values.retain(|_, value| !value.as_object().is_some_and(Map::is_empty));
     sources.retain(|field, _| values.contains_key(field));
-    ResolvedCompat { values, sources }
+    ResolvedCompat { preset_id: vendor.map(|profile| profile.preset_id), values, sources }
 }
 
 fn merge_compat_fragment(
@@ -502,8 +504,7 @@ pub fn resolve_model_reference(
     name: &str,
     scope: ModelScope,
 ) -> Vec<(String, String)> {
-    // A hidden unified model owns its name outright; validation keeps the name
-    // free of stored model ids otherwise.
+    // Unified names take precedence when both namespaces contain the same name.
     if let Some(unified) = unified_models.iter().find(|unified| unified.id == name) {
         return unified
             .members

@@ -823,7 +823,7 @@ mod tests {
         let listed = listed(&conn);
         assert_eq!(listed["providers"][0]["baseUrl"], "https://api.example.com/v1");
         assert_eq!(listed["providers"][0]["models"][0]["baseUrl"], "https://proxy.example.com/v1");
-        assert!(!listed.as_object().unwrap().contains_key("defaultModel"));
+        assert_eq!(listed.as_object().unwrap().len(), 1);
     }
 
     #[test]
@@ -1030,6 +1030,27 @@ mod tests {
         // An explicit null never clears a lower layer: the family default stays.
         assert_eq!(values["maxTokensField"], json!("max_completion_tokens"));
         assert_eq!(sources["maxTokensField"], "familyDefault");
+    }
+
+    #[test]
+    fn provider_preview_identifies_presets_by_host_without_storing_an_origin() {
+        for (url, expected) in [
+            ("https://api.openai.com/v1", Some("openai")),
+            ("https://api.moonshot.ai/v1", Some("moonshot")),
+            ("https://api.openai.com.other.example/v1", None),
+            ("https://api.openai.com@proxy.example/v1", None),
+        ] {
+            let mut draft = provider("OpenAI", true, vec![model("gpt-5")]);
+            draft.base_url = url.into();
+            let resolved =
+                operations::resolve_compat(&draft, None, &Protocol::from("openai-completions"));
+            assert_eq!(resolved.preset_id, expected);
+            let wire = serde_json::to_value(resolved).unwrap();
+            match expected {
+                Some(id) => assert_eq!(wire["presetId"], id),
+                None => assert!(wire.get("presetId").is_none()),
+            }
+        }
     }
 
     #[test]

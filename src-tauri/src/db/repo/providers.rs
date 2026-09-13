@@ -300,8 +300,7 @@ pub fn update(conn: &Connection, id: &str, spec: &ProviderConfig) -> Result<Prov
         return Err(AppError { code: ErrorCode::NotFound, message: "provider not found".into() });
     }
 
-    // Models missing from the draft are deleted explicitly: their default-model and
-    // unified-member rows disappear with them through ON DELETE CASCADE.
+    // Deleting a model also removes its unified-member references through the FK.
     let stored: Vec<String> = {
         let mut stmt = tx.prepare_cached("SELECT id FROM models WHERE provider_id = ?1")?;
         let ids =
@@ -758,7 +757,7 @@ mod tests {
         let created = create(&conn, &full_config()).unwrap();
         let provider_id = created.id.clone();
 
-        // A unified member and a default model pin rows that must survive the
+        // A unified member pins rows that must survive the
         // rewrite; a swapped sort_order would trip UNIQUE (provider_id, sort_order)
         // without the pre-upsert parking step.
         create_unified(
