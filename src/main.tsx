@@ -29,7 +29,7 @@ if (import.meta.env.DEV) {
 
 // Seeds the system theme and its derived tokens before first paint so the
 // initial render already uses the correct theme values. After mount,
-// useTheme in the root component owns the `.dark` class and the derived
+// useWindowAppearance in the root component owns the `.dark` class and derived
 // tokens (system follow and manual override), so this initialization has
 // no change listener of its own.
 seedInitialTheme();
@@ -52,8 +52,7 @@ initI18n();
 // back to the defaults instead of blocking startup.
 void (async () => {
   try {
-    await hydrateSharedPreferences();
-    await hydrateSidebarGeometry();
+    await Promise.all([hydrateSharedPreferences(), hydrateSidebarGeometry()]);
   } catch (error) {
     void logError(`preferences hydration failed: ${String(error)}`);
   }

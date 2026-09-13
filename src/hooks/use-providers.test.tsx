@@ -112,6 +112,16 @@ const WRITE_ERROR: AppError = { code: "invalid_input", message: "bad draft" };
 
 let queryClient: QueryClient;
 
+function deferred<T>() {
+  let reject: (error: unknown) => void = () => undefined;
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((complete, fail) => {
+    reject = fail;
+    resolve = complete;
+  });
+  return { promise, reject, resolve };
+}
+
 function isInvalidated(key: readonly unknown[]): boolean {
   return queryClient.getQueryState(key)?.isInvalidated === true;
 }
@@ -279,6 +289,146 @@ describe("provider write invalidations", () => {
     );
     expect(isInvalidated(providersKeys.all)).toBe(true);
     expect(isInvalidated(unifiedModelsKeys.all)).toBe(true);
+  });
+});
+
+describe("committed provider cache", () => {
+  it("uses the returned provider immediately and retains it when the refresh fails", async () => {
+    const sibling: Provider = { ...PROVIDER, id: "p2", name: "Sibling" };
+    const stored: Provider = { ...PROVIDER, name: "Stored name" };
+    const refresh = deferred<Providers>();
+    queryClient.setQueryData<Providers>(providersKeys.all, {
+      providers: [sibling, PROVIDER, { corrupted: true, id: "bad" }],
+    });
+    listProvidersMock.mockReturnValue(refresh.promise);
+    updateProviderMock.mockResolvedValue(stored);
+    const { result } = renderHook(
+      () => ({ list: useProviders(), update: useUpdateProvider() }),
+      { wrapper: Wrapper },
+    );
+    let submitted: Promise<Provider> | undefined;
+    act(() => {
+      submitted = result.current.update.mutateAsync({
+        id: PROVIDER.id,
+        provider: { ...PROVIDER_DRAFT, name: "Submitted name" },
+      });
+    });
+    await waitFor(() => expect(listProvidersMock).toHaveBeenCalledOnce());
+    expect(queryClient.getQueryData(providersKeys.all)).toEqual({
+      providers: [sibling, stored, { corrupted: true, id: "bad" }],
+    });
+    expect(result.current.update.isPending).toBe(true);
+    await act(async () => {
+      refresh.reject(READ_ERROR);
+      await expect(submitted).resolves.toEqual(stored);
+    });
+    await waitFor(() => expect(result.current.update.isSuccess).toBe(true));
+    expect(result.current.update.error).toBeNull();
+    expect(result.current.list.error).toEqual(READ_ERROR);
+    expect(result.current.list.providers).toEqual([
+      sibling,
+      stored,
+      { corrupted: true, id: "bad" },
+    ]);
+  });
+
+  it("prevents an older in-flight read from replacing the committed provider", async () => {
+    const stored: Provider = { ...PROVIDER, name: "Saved" };
+    const staleRead = deferred<Providers>();
+    queryClient.setQueryData<Providers>(providersKeys.all, {
+      providers: [PROVIDER],
+    });
+    listProvidersMock
+      .mockReturnValueOnce(staleRead.promise)
+      .mockRejectedValue(READ_ERROR);
+    updateProviderMock.mockResolvedValue(stored);
+    const { result } = renderHook(
+      () => ({ list: useProviders(), update: useUpdateProvider() }),
+      { wrapper: Wrapper },
+    );
+    act(() => result.current.list.retry());
+    await waitFor(() => expect(listProvidersMock).toHaveBeenCalledOnce());
+    await act(async () => {
+      await result.current.update.mutateAsync({
+        id: PROVIDER.id,
+        provider: PROVIDER_DRAFT,
+      });
+    });
+    await waitFor(() => expect(result.current.list.error).toEqual(READ_ERROR));
+    expect(result.current.list.providers).toEqual([stored]);
+    await act(async () => {
+      staleRead.resolve({ providers: [PROVIDER] });
+      await staleRead.promise;
+    });
+    expect(result.current.list.providers).toEqual([stored]);
+    expect(result.current.update.isSuccess).toBe(true);
+  });
+
+  it("preserves both provider commits when concurrent updates finish out of order", async () => {
+    const second: Provider = { ...PROVIDER, id: "p2", name: "Second" };
+    const savedFirst: Provider = { ...PROVIDER, name: "Saved first" };
+    const savedSecond: Provider = { ...second, name: "Saved second" };
+    const firstWrite = deferred<Provider>();
+    const secondWrite = deferred<Provider>();
+    queryClient.setQueryData<Providers>(providersKeys.all, {
+      providers: [PROVIDER, second],
+    });
+    listProvidersMock.mockRejectedValue(READ_ERROR);
+    updateProviderMock.mockImplementation(({ id }) =>
+      id === PROVIDER.id ? firstWrite.promise : secondWrite.promise,
+    );
+    const { result } = renderHook(
+      () => ({
+        first: useUpdateProvider(),
+        list: useProviders(),
+        second: useUpdateProvider(),
+      }),
+      { wrapper: Wrapper },
+    );
+    let firstSubmitted: Promise<Provider> | undefined;
+    let secondSubmitted: Promise<Provider> | undefined;
+    act(() => {
+      firstSubmitted = result.current.first.mutateAsync({
+        id: PROVIDER.id,
+        provider: PROVIDER_DRAFT,
+      });
+      secondSubmitted = result.current.second.mutateAsync({
+        id: second.id,
+        provider: PROVIDER_DRAFT,
+      });
+    });
+    await act(async () => {
+      secondWrite.resolve(savedSecond);
+      await secondSubmitted;
+    });
+    await waitFor(() =>
+      expect(result.current.list.providers).toEqual([PROVIDER, savedSecond]),
+    );
+    await act(async () => {
+      firstWrite.resolve(savedFirst);
+      await firstSubmitted;
+    });
+    await waitFor(() =>
+      expect(result.current.list.providers).toEqual([savedFirst, savedSecond]),
+    );
+    expect(result.current.first.isSuccess).toBe(true);
+    expect(result.current.second.isSuccess).toBe(true);
+    expect(result.current.list.error).toEqual(READ_ERROR);
+  });
+
+  it("does not invent a complete catalog from an update when no catalog has loaded", async () => {
+    updateProviderMock.mockResolvedValue(PROVIDER);
+    const { result } = renderHook(() => useUpdateProvider(), {
+      wrapper: Wrapper,
+    });
+    await act(async () => {
+      await result.current.mutateAsync({
+        id: PROVIDER.id,
+        provider: PROVIDER_DRAFT,
+      });
+    });
+    expect(queryClient.getQueryData(providersKeys.all)).toBeUndefined();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
 });
 

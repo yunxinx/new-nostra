@@ -1,6 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { emit, TauriEvent } from "@tauri-apps/api/event";
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import {
   afterEach,
   beforeAll,
@@ -18,8 +26,11 @@ import { initI18n } from "@/lib/i18n";
 import {
   listProviderPresets,
   listProviders,
+  listUnifiedModels,
   resolveCompat,
+  updateProvider,
 } from "@/lib/ipc/providers";
+import { resolveSettingsClose } from "@/lib/ipc/windows";
 
 import { SettingsWindowApp } from "./SettingsWindowApp";
 
@@ -42,10 +53,16 @@ vi.mock("@/lib/ipc/providers", () => ({
 // The theming shell (window background, derived tokens, matchMedia) is
 // outside this harness; the navigation only consumes the boolean.
 vi.mock("@/features/appearance/use-theme", () => ({ useTheme: () => false }));
+vi.mock("@/features/appearance/use-window-appearance", () => ({
+  useWindowAppearance: () => undefined,
+}));
+vi.mock("@/lib/ipc/windows", () => ({ resolveSettingsClose: vi.fn() }));
 
 const listProviderPresetsMock = vi.mocked(listProviderPresets);
 const listProvidersMock = vi.mocked(listProviders);
 const resolveCompatMock = vi.mocked(resolveCompat);
+const resolveSettingsCloseMock = vi.mocked(resolveSettingsClose);
+const updateProviderMock = vi.mocked(updateProvider);
 
 const STORED: Provider = {
   abortOnDisconnect: true,
@@ -88,18 +105,21 @@ beforeEach(() => {
     defaultOptions: { queries: { retry: false } },
   });
   vi.resetAllMocks();
-  // The shell reveals its window on mount; the bridge answers exactly those
-  // commands so an unexpected invoke fails the test instead of hanging.
   mockWindows("settings");
-  mockIPC((command) => {
-    if (
-      command === "plugin:window|show" ||
-      command === "plugin:window|set_focus"
-    ) {
-      return undefined;
-    }
-    throw new Error(`Unexpected IPC command: ${command}`);
-  });
+  mockIPC(
+    (command) => {
+      if (
+        command === "plugin:window|show" ||
+        command === "plugin:window|set_focus"
+      ) {
+        return undefined;
+      }
+      throw new Error(`Unexpected IPC command: ${command}`);
+    },
+    { shouldMockEvents: true },
+  );
+  resolveSettingsCloseMock.mockResolvedValue(undefined);
+  vi.mocked(listUnifiedModels).mockResolvedValue([]);
   listProviderPresetsMock.mockResolvedValue([]);
   listProvidersMock.mockResolvedValue({
     providers: [STORED],
@@ -142,7 +162,7 @@ function providersMarker(): HTMLElement | null {
   return screen.queryByRole("searchbox", { name: "Search providers" });
 }
 
-function renderWindow(): void {
+async function renderWindow(): Promise<void> {
   render(
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
@@ -150,6 +170,13 @@ function renderWindow(): void {
       </TooltipProvider>
     </QueryClientProvider>,
   );
+  await screen.findByRole("button", { name: "General" });
+}
+
+async function requestNativeClose(): Promise<void> {
+  await act(async () => {
+    await emit(TauriEvent.WINDOW_CLOSE_REQUESTED);
+  });
 }
 
 /** Marker of the unified-models page: the create button is unique to it. */
@@ -157,9 +184,182 @@ function unifiedMarker(): HTMLElement | null {
   return screen.queryByRole("button", { name: "New unified model" });
 }
 
+describe("native settings close", () => {
+  it("accepts an unedited settings page without a draft confirmation", async () => {
+    await renderWindow();
+    await requestNativeClose();
+    await waitFor(() => expect(closeDecisions()).toEqual([true]));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("coalesces close requests and preserves the provider draft when cancelled", async () => {
+    await renderWindow();
+    await openProviders();
+    fireEvent.click(screen.getByRole("button", { name: "Upstream" }));
+    fireEvent.change(nameField(), { target: { value: "Edited" } });
+    await requestNativeClose();
+    await requestNativeClose();
+    expect(await screen.findAllByRole("alertdialog")).toHaveLength(1);
+    expect(resolveSettingsCloseMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(closeDecisions()).toEqual([false]));
+    expect(nameField()).toHaveProperty("value", "Edited");
+
+    await requestNativeClose();
+    await screen.findByRole("alertdialog");
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    await waitFor(() => expect(closeDecisions()).toEqual([false, true]));
+    expect(resolveSettingsCloseMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("waits for an in-flight save before accepting a clean close", async () => {
+    let completeSave: (provider: Provider) => void = () => {
+      throw new Error("No save pending");
+    };
+    updateProviderMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          completeSave = resolve;
+        }),
+    );
+    await renderWindow();
+    await openProviders();
+    fireEvent.click(screen.getByRole("button", { name: "Upstream" }));
+    fireEvent.change(nameField(), { target: { value: "Saved name" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateProviderMock).toHaveBeenCalledOnce());
+    await requestNativeClose();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(resolveSettingsCloseMock).not.toHaveBeenCalled();
+    await act(() => {
+      completeSave({ ...STORED, name: "Saved name" });
+      return Promise.resolve();
+    });
+    await waitFor(() => expect(closeDecisions()).toEqual([true]));
+  });
+
+  it("guards edits made after submitting once the pending save completes", async () => {
+    let completeSave: (provider: Provider) => void = () => {
+      throw new Error("No save pending");
+    };
+    updateProviderMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          completeSave = resolve;
+        }),
+    );
+    await renderWindow();
+    await openProviders();
+    fireEvent.click(screen.getByRole("button", { name: "Upstream" }));
+    fireEvent.change(nameField(), { target: { value: "Submitted name" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateProviderMock).toHaveBeenCalledOnce());
+    fireEvent.change(nameField(), { target: { value: "Later edit" } });
+    await requestNativeClose();
+    expect(resolveSettingsCloseMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await act(() => {
+      completeSave({ ...STORED, name: "Submitted name" });
+      return Promise.resolve();
+    });
+    await screen.findByRole("alertdialog");
+    expect(resolveSettingsCloseMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(closeDecisions()).toEqual([false]));
+    expect(nameField()).toHaveProperty("value", "Later edit");
+  });
+
+  it("uses the unified-model editor's existing unsaved guard", async () => {
+    await renderWindow();
+    clickNav("Unified models");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New unified model" }),
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "Draft unified" },
+    });
+    await requestNativeClose();
+    await screen.findByRole("alertdialog");
+    expect(resolveSettingsCloseMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(closeDecisions()).toEqual([false]));
+    expect(nameField()).toHaveProperty("value", "Draft unified");
+  });
+
+  it("retains a floating model draft until native close is confirmed", async () => {
+    await renderWindow();
+    clickNav("Model list");
+    fireEvent.click(await screen.findByRole("button", { name: "Edit m1" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Display name" }), {
+      target: { value: "Draft model name" },
+    });
+    await requestNativeClose();
+    await screen.findByRole("alertdialog");
+    expect(resolveSettingsCloseMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(closeDecisions()).toEqual([false]));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(
+      screen.getByRole("textbox", { name: "Display name" }),
+    ).toHaveProperty("value", "Draft model name");
+
+    await requestNativeClose();
+    await screen.findByRole("alertdialog");
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    await waitFor(() => expect(closeDecisions()).toEqual([false, true]));
+  });
+
+  it("keeps a failed save's draft behind its close confirmation", async () => {
+    let failSave: (reason: unknown) => void = () => {
+      throw new Error("No save pending");
+    };
+    updateProviderMock.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          failSave = reject;
+        }),
+    );
+    await renderWindow();
+    await openProviders();
+    fireEvent.click(screen.getByRole("button", { name: "Upstream" }));
+    fireEvent.change(nameField(), { target: { value: "Unsaved name" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateProviderMock).toHaveBeenCalledOnce());
+    await requestNativeClose();
+    expect(resolveSettingsCloseMock).not.toHaveBeenCalled();
+    await act(() => {
+      failSave({ code: "db", message: "database unavailable" });
+      return Promise.resolve();
+    });
+    await screen.findByRole("alertdialog");
+    expect(nameField()).toHaveProperty("value", "Unsaved name");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(closeDecisions()).toEqual([false]));
+    expect(nameField()).toHaveProperty("value", "Unsaved name");
+  });
+
+  it("retries a failed cancellation without converting it into accepted close", async () => {
+    resolveSettingsCloseMock.mockRejectedValueOnce({
+      code: "internal",
+      message: "close resolution unavailable",
+    });
+    await renderWindow();
+    await openProviders();
+    fireEvent.click(screen.getByRole("button", { name: "Upstream" }));
+    fireEvent.change(nameField(), { target: { value: "Draft to keep" } });
+    await requestNativeClose();
+    await screen.findByRole("alertdialog");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    fireEvent.click(retry);
+    await waitFor(() => expect(closeDecisions()).toEqual([false, false]));
+  });
+});
+
 describe("settings navigation", () => {
-  it("keeps the catalogue a page of its own and the gateway its own group", () => {
-    renderWindow();
+  it("keeps the catalogue a page of its own and the gateway its own group", async () => {
+    await renderWindow();
     expect(screen.getByText("Model services")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Providers" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Model list" })).toBeTruthy();
@@ -172,7 +372,7 @@ describe("settings navigation", () => {
   });
 
   it("collapses the gateway group without losing the page its child holds", async () => {
-    renderWindow();
+    await renderWindow();
     clickNav("Unified models");
     await screen.findByRole("button", { name: "New unified model" });
 
@@ -188,8 +388,8 @@ describe("settings navigation", () => {
     expect(unifiedMarker()).toBeTruthy();
   });
 
-  it("expands an unvisited group without entering its first subpage", () => {
-    renderWindow();
+  it("expands an unvisited group without entering its first subpage", async () => {
+    await renderWindow();
     clickNav("Gateway");
     expect(screen.queryByRole("button", { name: "Unified models" })).toBeNull();
 
@@ -211,7 +411,7 @@ describe("settings navigation", () => {
   });
 
   it("switches from the provider page to the model list", async () => {
-    renderWindow();
+    await renderWindow();
     await openProviders();
     expect(providersMarker()).toBeTruthy();
 
@@ -222,7 +422,7 @@ describe("settings navigation", () => {
   });
 
   it("switches to the unified-models subpage", async () => {
-    renderWindow();
+    await renderWindow();
     clickNav("Unified models");
 
     expect(
@@ -234,7 +434,7 @@ describe("settings navigation", () => {
 
 describe("navigation away from the provider draft", () => {
   it("holds the switch until the dirty draft is confirmed for discard", async () => {
-    renderWindow();
+    await renderWindow();
     await openProviders();
     fireEvent.click(screen.getByRole("button", { name: "Upstream" }));
     fireEvent.change(nameField(), { target: { value: "Edited" } });
@@ -253,7 +453,7 @@ describe("navigation away from the provider draft", () => {
   });
 
   it("keeps the draft and the page when the parked switch is cancelled", async () => {
-    renderWindow();
+    await renderWindow();
     await openProviders();
     fireEvent.click(screen.getByRole("button", { name: "Upstream" }));
     fireEvent.change(nameField(), { target: { value: "Edited" } });
@@ -274,7 +474,7 @@ describe("navigation away from the provider draft", () => {
   });
 
   it("leaves a clean provider draft without a notice", async () => {
-    renderWindow();
+    await renderWindow();
     await openProviders();
     fireEvent.click(screen.getByRole("button", { name: "Upstream" }));
 
@@ -285,7 +485,7 @@ describe("navigation away from the provider draft", () => {
   });
 
   it("keeps the parked in-page action when the guard is cancelled", async () => {
-    renderWindow();
+    await renderWindow();
     await openProviders();
     fireEvent.click(screen.getByRole("button", { name: "Upstream" }));
     fireEvent.change(nameField(), { target: { value: "Edited" } });
@@ -306,3 +506,7 @@ describe("navigation away from the provider draft", () => {
     expect(providersMarker()).toBeNull();
   });
 });
+
+function closeDecisions(): boolean[] {
+  return resolveSettingsCloseMock.mock.calls.map(([accepted]) => accepted);
+}

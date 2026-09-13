@@ -16,6 +16,8 @@
     "filterEmpty": "没有匹配的选项",
     "filterProtocol": "协议",
     "filterProvider": "供应商",
+    "movePanel": "移动{{title}}",
+    "movePanelHint": "拖拽或使用方向键移动，按住 Shift 可加大移动幅度",
     "retry": "重试",
     "revertField": "恢复为已保存的值",
     "save": "保存",

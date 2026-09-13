@@ -56,6 +56,7 @@ describe("provider save ownership", () => {
     const { result } = editor();
     act(() => result.current.form.setValue("name", "Submitted"));
     act(() => result.current.save());
+    expect(result.current.isSaving).toBe(true);
     await waitFor(() => expect(updateProvider).toHaveBeenCalledTimes(1));
     act(() => result.current.form.setValue("name", "Still typing"));
     act(() => {

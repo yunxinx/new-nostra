@@ -35,6 +35,9 @@ import { useUiStore } from "@/stores/ui-store";
 import { App } from "./App";
 
 vi.mock("@/features/appearance/use-theme", () => ({ useTheme: () => false }));
+vi.mock("@/features/appearance/use-window-appearance", () => ({
+  useWindowAppearance: () => undefined,
+}));
 
 const NOW = "2026-09-09T00:00:00.000Z";
 // Long enough that the derived 50-code-point title differs from the body.

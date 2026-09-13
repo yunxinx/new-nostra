@@ -386,6 +386,11 @@ export interface ResolvedCompat {
   values: Record<string, JsonValue>;
 }
 
+/** Mirrors commands/windows.rs: the settings window's close decision; false cancels the whole pending exit. */
+export interface ResolveSettingsCloseParams {
+  accepted: boolean;
+}
+
 /**
  * Mirrors src-tauri/src/commands/sessions.rs SessionDto. RFC 3339 UTC
  * timestamps with fixed millisecond precision.
@@ -423,6 +428,11 @@ export interface SessionCursor {
 export interface SessionPage {
   nextCursor: null | SessionCursor;
   sessions: Session[];
+}
+
+/** Mirrors commands/windows.rs: an explicit opaque #RRGGBB color, e.g. "#22272e"; malformed or missing values are rejected. */
+export interface SetWindowBackgroundParams {
+  color: string;
 }
 
 /**

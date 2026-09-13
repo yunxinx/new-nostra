@@ -79,6 +79,7 @@ export function ProvidersPage({
   const [listWidth, setListWidth] = useState(LIST_WIDTH_DEFAULT);
   const target = draft.target;
   const isEmptyLibrary = !isLoading && providers.length === 0;
+  const isWriting = draft.isSaving || draft.isToggling || create.isPending;
   const isNavBlocked = isNavRequested && draft.isChanged;
 
   // A clean draft cannot hold the switch, so the parked request is answered
@@ -87,10 +88,10 @@ export function ProvidersPage({
   // Reverting the draft by hand while the notice is up answers through this
   // same path — nothing is left to guard.
   useEffect(() => {
-    if (isNavRequested && !draft.isChanged) {
+    if (isNavRequested && !draft.isChanged && !isWriting) {
       onNavRequestResolved?.(true);
     }
-  }, [draft.isChanged, isNavRequested, onNavRequestResolved]);
+  }, [draft.isChanged, isNavRequested, isWriting, onNavRequestResolved]);
 
   // A create completion is judged on the freshest render rather than inside
   // the write's own closure: the stamp it carries proves the session that
@@ -153,6 +154,7 @@ export function ProvidersPage({
   }
 
   function handleConfirmDiscard(): void {
+    if (isWriting) return;
     if (isNavBlocked) {
       draft.discard();
       onNavRequestResolved?.(true);
@@ -266,7 +268,7 @@ export function ProvidersPage({
         <DirtyNotice
           onCancel={handleCancelPending}
           onConfirm={handleConfirmDiscard}
-          open={pending !== null || isNavBlocked}
+          open={!isWriting && (pending !== null || isNavBlocked)}
         />
         {renderDetail()}
       </div>

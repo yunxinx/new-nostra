@@ -58,22 +58,21 @@ const COLUMN_COUNT = 5;
 /** One width per column; the protocols take what is left. */
 const COLUMNS = ["w-10", "w-64", undefined, "w-32", "w-20"];
 
-interface ModelEditTarget {
-  index: number;
-  model: ModelEntry;
-  provider: Provider;
+type ModelAction =
+  | {
+      anchor: HTMLElement;
+      key: string;
+      kind: "open";
+      panelKind: ModelPanel["kind"];
+    }
+  | { keys: string[]; kind: "delete" };
+
+interface ModelPanel {
+  anchor: HTMLElement;
+  kind: "card" | "edit";
+  row: AggregateRow;
 }
 
-/**
- * Every model of every provider in one list: what it is called, which
- * protocols it answers on, what it costs and whether it can be reached, under
- * a heading that names the provider it belongs to.
- *
- * The list is where a model is read, and it is also where a model is fixed:
- * the row's editor opens over the list rather than navigating to the provider
- * that owns it, because the question that sent the user here — which models
- * are there, and what do they cost — is the question they come back to.
- */
 export function ModelsListPage({
   isNavRequested = false,
   onNavRequestResolved,
@@ -89,8 +88,8 @@ export function ModelsListPage({
   const [search, setSearch] = useState("");
   const [providerIds, setProviderIds] = useState<string[]>([]);
   const [protocols, setProtocols] = useState<string[]>([]);
-  const [edit, setEdit] = useState<ModelEditTarget | null>(null);
-  const [card, setCard] = useState<AggregateRow | null>(null);
+  const [panel, setPanel] = useState<ModelPanel | null>(null);
+  const [pendingAction, setPendingAction] = useState<ModelAction | null>(null);
   const selection = useRowSelection();
 
   // A disabled provider answers nothing, so its models are not part of the
@@ -147,18 +146,20 @@ export function ModelsListPage({
     filtered.length > 0 &&
     filtered.every((row) => selection.isSelected(rowKey(row)));
 
+  const hasEditor = panel?.kind === "edit";
+
   useEffect(() => {
-    if (isNavRequested && edit === null && !batch.isDeleting)
+    if (isNavRequested && !hasEditor && !batch.isDeleting)
       onNavRequestResolved?.(true);
-  }, [batch.isDeleting, edit, isNavRequested, onNavRequestResolved]);
+  }, [batch.isDeleting, hasEditor, isNavRequested, onNavRequestResolved]);
   const { prune } = selection;
   useEffect(() => {
     prune(rows.map(rowKey));
   }, [prune, rows]);
 
-  function removeSelected(): void {
+  function removeModels(keys: string[]): void {
     const targets = sectionRows(
-      rows.filter((row) => selection.isSelected(rowKey(row))),
+      rows.filter((row) => keys.includes(rowKey(row))),
     ).map(({ provider, rows: selected }) => ({
       keys: selected.map(rowKey),
       label: provider.name,
@@ -174,6 +175,64 @@ export function ModelsListPage({
         }),
     }));
     void batch.run(targets, (keys) => selection.setMany(keys, false));
+  }
+
+  function applyAction(action: ModelAction): void {
+    setPendingAction(null);
+    switch (action.kind) {
+      case "delete":
+        setPanel(null);
+        removeModels(action.keys);
+        break;
+      case "open": {
+        // A save can refresh the provider while a switch waits. Resolve the
+        // requested identity now so its editor never inherits an old snapshot.
+        const row = rows.find((entry) => rowKey(entry) === action.key);
+        setPanel(
+          row === undefined
+            ? null
+            : { anchor: action.anchor, kind: action.panelKind, row },
+        );
+        break;
+      }
+    }
+  }
+
+  function requestAction(action: ModelAction): void {
+    if (
+      isNavRequested ||
+      (batch.isDeleting &&
+        (action.kind === "delete" || action.panelKind === "edit"))
+    ) {
+      return;
+    }
+    if (
+      action.kind === "open" &&
+      panel?.kind === action.panelKind &&
+      rowKey(panel.row) === action.key
+    ) {
+      return;
+    }
+    if (hasEditor) setPendingAction(action);
+    else applyAction(action);
+  }
+
+  function handlePanelClose(): void {
+    if (!isNavRequested && pendingAction !== null) applyAction(pendingAction);
+    else {
+      setPanel(null);
+      setPendingAction(null);
+    }
+  }
+
+  function handlePanelNavResolved(accepted: boolean): void {
+    if (isNavRequested) {
+      setPendingAction(null);
+      onNavRequestResolved?.(accepted);
+    } else if (pendingAction !== null) {
+      if (accepted) applyAction(pendingAction);
+      else setPendingAction(null);
+    }
   }
 
   // The same 8px inset on three sides as the provider list's column: the
@@ -279,20 +338,23 @@ export function ModelsListPage({
               </TableRow>
               {group.map((row) => (
                 <ModelListRow
+                  activePanel={
+                    panel !== null && rowKey(panel.row) === rowKey(row)
+                      ? panel.kind
+                      : null
+                  }
                   isDeleting={batch.isDeleting}
                   isSelected={selection.isSelected(rowKey(row))}
                   key={rowKey(row)}
                   model={row.model}
-                  onEdit={() =>
-                    setEdit({
-                      index: (provider.models ?? []).findIndex(
-                        (entry) => entry.id === row.model.id,
-                      ),
-                      model: row.model,
-                      provider,
+                  onOpenPanel={(panelKind, anchor) =>
+                    requestAction({
+                      anchor,
+                      key: rowKey(row),
+                      kind: "open",
+                      panelKind,
                     })
                   }
-                  onOpenCard={() => setCard(row)}
                   onToggle={() => selection.toggle(rowKey(row))}
                 />
               ))}
@@ -317,7 +379,14 @@ export function ModelsListPage({
       <BulkActionBar count={selection.count} onClear={selection.clear}>
         <Button
           disabled={batch.isDeleting}
-          onClick={removeSelected}
+          onClick={() =>
+            requestAction({
+              keys: rows
+                .filter((row) => selection.isSelected(rowKey(row)))
+                .map(rowKey),
+              kind: "delete",
+            })
+          }
           size="xs"
           type="button"
           variant="destructive"
@@ -326,19 +395,29 @@ export function ModelsListPage({
           {t("settings.providers.removeModel")}
         </Button>
       </BulkActionBar>
-      {edit !== null && (
+      {panel?.kind === "edit" && (
         <ModelEditPanel
-          isNavRequested={isNavRequested}
-          onClose={() => setEdit(null)}
-          onNavRequestResolved={onNavRequestResolved}
-          target={edit}
+          anchor={panel.anchor}
+          isNavRequested={isNavRequested || pendingAction !== null}
+          key={`edit-${rowKey(panel.row)}`}
+          onClose={handlePanelClose}
+          onNavRequestResolved={handlePanelNavResolved}
+          target={{
+            index: (panel.row.provider.models ?? []).findIndex(
+              (entry) => entry.id === panel.row.model.id,
+            ),
+            model: panel.row.model,
+            provider: panel.row.provider,
+          }}
         />
       )}
-      {card !== null && (
+      {panel?.kind === "card" && (
         <ModelCardPanel
-          model={card.model}
-          onClose={() => setCard(null)}
-          provider={card.provider}
+          anchor={panel.anchor}
+          key={`card-${rowKey(panel.row)}`}
+          model={panel.row.model}
+          onClose={handlePanelClose}
+          provider={panel.row.provider}
         />
       )}
     </div>
@@ -346,18 +425,18 @@ export function ModelsListPage({
 }
 
 function ModelListRow({
+  activePanel,
   isDeleting,
   isSelected,
   model,
-  onEdit,
-  onOpenCard,
+  onOpenPanel,
   onToggle,
 }: {
+  activePanel: ModelPanel["kind"] | null;
   isDeleting: boolean;
   isSelected: boolean;
   model: ModelEntry;
-  onEdit: () => void;
-  onOpenCard: () => void;
+  onOpenPanel: (kind: ModelPanel["kind"], anchor: HTMLElement) => void;
   onToggle: () => void;
 }) {
   const { t } = useTranslation();
@@ -404,11 +483,13 @@ function ModelListRow({
               snapshot still carries the model the write just removed, and
               saving would put it back. */}
           <IconButton
+            aria-expanded={activePanel === "edit"}
+            aria-haspopup="dialog"
             aria-label={t("settings.models.editModel", {
               model: modelDisplayName(model),
             })}
             disabled={isDeleting}
-            onClick={onEdit}
+            onClick={(event) => onOpenPanel("edit", event.currentTarget)}
             size="icon-xs"
             type="button"
             variant="ghost"
@@ -416,10 +497,12 @@ function ModelListRow({
             <Pencil className="size-3.5" />
           </IconButton>
           <IconButton
+            aria-expanded={activePanel === "card"}
+            aria-haspopup="dialog"
             aria-label={t("settings.models.viewCard", {
               model: modelDisplayName(model),
             })}
-            onClick={onOpenCard}
+            onClick={(event) => onOpenPanel("card", event.currentTarget)}
             size="icon-xs"
             type="button"
             variant="ghost"

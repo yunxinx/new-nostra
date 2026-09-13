@@ -3,6 +3,7 @@
 mod entries;
 mod providers;
 mod sessions;
+mod windows;
 
 use crate::error::{AppError, ErrorCode};
 use tauri::ipc::Invoke;
@@ -31,6 +32,8 @@ pub fn handler() -> impl Fn(Invoke) -> bool + Send + Sync + 'static {
         providers::create_unified_model,
         providers::update_unified_model,
         providers::delete_unified_model,
+        windows::resolve_settings_close,
+        windows::set_window_background,
     ]
 }
 

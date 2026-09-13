@@ -107,7 +107,13 @@ export function AccountBar() {
             {isDark ? <Moon /> : <Sun />}
             {t(isDark ? "account.switchToLight" : "account.switchToDark")}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void openSettings()}>
+          <DropdownMenuItem
+            onSelect={() => {
+              void openSettings().catch((error: unknown) =>
+                console.error("Settings window creation failed", error),
+              );
+            }}
+          >
             <Settings />
             {t("account.settings")}
           </DropdownMenuItem>

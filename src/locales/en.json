@@ -16,6 +16,8 @@
     "filterEmpty": "No matching option",
     "filterProtocol": "Protocol",
     "filterProvider": "Provider",
+    "movePanel": "Move {{title}}",
+    "movePanelHint": "Drag to move, or use the arrow keys. Hold Shift for larger steps.",
     "retry": "Retry",
     "revertField": "Restore the saved value",
     "save": "Save",

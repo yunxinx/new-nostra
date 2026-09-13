@@ -433,7 +433,7 @@ export function useProviderDraft(
     hasInvalidInputs,
     isChanged: changedFields.size > 0,
     isKeyRevealed,
-    isSaving: update.isPending,
+    isSaving: form.formState.isSubmitting || update.isPending,
     isToggling: toggle.isPending,
     modelRows: state.modelRows,
     models,

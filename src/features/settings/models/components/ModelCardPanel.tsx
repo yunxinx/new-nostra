@@ -17,6 +17,7 @@ import { providerToDraft } from "../../providers/draft";
 import { formatRate, priceSummary } from "../model-pricing";
 
 interface ModelCardPanelProps {
+  anchor: HTMLElement;
   model: ModelEntry;
   onClose: () => void;
   provider: Provider;
@@ -30,6 +31,7 @@ interface ModelCardPanelProps {
  * together is the whole point.
  */
 export function ModelCardPanel({
+  anchor,
   model,
   onClose,
   provider,
@@ -47,8 +49,11 @@ export function ModelCardPanel({
   const resolved = useCompatResolution(families, input);
   const summary = priceSummary(model.cost);
 
+  if (resolved.isInitialLoading) return null;
+
   return (
     <FloatingPanel
+      anchor={anchor}
       footer={
         <Button onClick={onClose} size="sm" type="button" variant="outline">
           {t("common.close")}

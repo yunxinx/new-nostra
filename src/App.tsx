@@ -1,4 +1,3 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SquarePen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -11,7 +10,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useTheme } from "@/features/appearance/use-theme";
+import { useWindowAppearance } from "@/features/appearance/use-window-appearance";
 import { ChatHeader } from "@/features/chat/components/ChatHeader";
 import { MessageList } from "@/features/chat/components/MessageList";
 import { ComposerFocusContext } from "@/features/chat/composer-focus-context";
@@ -24,7 +23,7 @@ import { draftKeyFor, useUiStore } from "@/stores/ui-store";
 
 export function App() {
   const { t } = useTranslation();
-  useTheme();
+  useWindowAppearance();
   useShortcuts();
   useSidebarPersistence();
   // The send orchestration lives in App's stable lifetime so submissions
@@ -41,19 +40,6 @@ export function App() {
   const cancelFocusTrackingRef = useRef<(() => void) | null>(null);
 
   useEffect(() => () => cancelFocusTrackingRef.current?.(), []);
-
-  // The window is created hidden (geometry restores offscreen of view).
-  // WebKit never schedules requestAnimationFrame while the host window is
-  // ordered out, so a rAF-gated show() would deadlock; reveal must not
-  // depend on rAF. setFocus after show: tao's set_focus is a no-op on
-  // hidden windows, so it must run once show() resolves; on macOS it also
-  // performs the app-level activation (activateIgnoringOtherApps). Both
-  // calls are idempotent under StrictMode double-mount.
-  useEffect(() => {
-    void getCurrentWindow()
-      .show()
-      .then(() => void getCurrentWindow().setFocus());
-  }, []);
 
   function handleSend(text: string): void {
     const store = useUiStore.getState();

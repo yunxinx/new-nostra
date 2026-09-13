@@ -18,7 +18,12 @@ import {
   vi,
 } from "vitest";
 
-import type { Provider, ProviderListItem, Providers } from "@/types/ipc";
+import type {
+  Provider,
+  ProviderListItem,
+  Providers,
+  ResolvedCompat,
+} from "@/types/ipc";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { initI18n } from "@/lib/i18n";
@@ -563,4 +568,222 @@ it("protects a floating model draft on close and can revert one field", async ()
     }),
   );
   expect(displayName()).toHaveProperty("value", "GPT-4o");
+});
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
+describe("nonmodal model panels", () => {
+  it("presents the card with its first resolved compatibility values", async () => {
+    await renderPage([GATEWAY], 2);
+    const resolution = deferred<ResolvedCompat>();
+    resolveCompatMock.mockReturnValue(resolution.promise);
+    fireEvent.click(
+      screen.getByRole("button", { name: "View the card of GPT-4o" }),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await act(async () => {
+      resolution.resolve({ sources: {}, values: { vllmPriority: 91 } });
+      await resolution.promise;
+    });
+    const card = await screen.findByRole("dialog", { name: "GPT-4o" });
+    expect(within(card).getByText("gpt-4o")).toBeTruthy();
+    expect(within(card).getAllByText("91")).toHaveLength(2);
+  });
+
+  it("does not resurrect a delayed card after another model was chosen", async () => {
+    await renderPage([GATEWAY], 2);
+    const resolution = deferred<ResolvedCompat>();
+    resolveCompatMock.mockReturnValue(resolution.promise);
+    fireEvent.click(
+      screen.getByRole("button", { name: "View the card of GPT-4o" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit draft-model" }));
+    const editor = screen.getByRole("dialog", { name: "draft-model" });
+    await act(async () => {
+      resolution.resolve({ sources: {}, values: { vllmPriority: 91 } });
+      await resolution.promise;
+    });
+    expect(screen.getAllByRole("dialog")).toEqual([editor]);
+    expect(
+      screen.getByRole("textbox", { name: "Display name" }),
+    ).toHaveProperty("value", "");
+  });
+
+  it("retains the card and its base facts while retrying a failed first resolution", async () => {
+    await renderPage([GATEWAY], 2);
+    resolveCompatMock.mockRejectedValue(new Error("preview failed"));
+    fireEvent.click(
+      screen.getByRole("button", { name: "View the card of GPT-4o" }),
+    );
+    const card = await screen.findByRole("dialog", { name: "GPT-4o" });
+    expect(within(card).getByRole("alert")).toBeTruthy();
+    expect(within(card).getByText("gpt-4o")).toBeTruthy();
+    const resolution = deferred<ResolvedCompat>();
+    resolveCompatMock.mockReturnValue(resolution.promise);
+    const retry = within(card).getByRole("button", { name: "Retry" });
+    act(() => retry.focus());
+    fireEvent.click(retry, { detail: 0 });
+    expect(screen.getByRole("dialog")).toBe(card);
+    expect(document.activeElement).toBe(retry);
+    expect(retry.getAttribute("aria-disabled")).toBe("true");
+    const callCount = resolveCompatMock.mock.calls.length;
+    fireEvent.click(retry, { detail: 0 });
+    expect(resolveCompatMock.mock.calls).toHaveLength(callCount);
+    await act(async () => {
+      resolution.resolve({ sources: {}, values: { vllmPriority: 91 } });
+      await resolution.promise;
+    });
+    expect(screen.getByRole("dialog")).toBe(card);
+    expect(within(card).queryByRole("alert")).toBeNull();
+    expect(within(card).getAllByText("91")).toHaveLength(2);
+  });
+
+  it("keeps background filters interactive and switches clean panels one at a time", async () => {
+    await renderPage([GATEWAY], 2);
+    fireEvent.click(screen.getByRole("button", { name: "Edit GPT-4o" }));
+    const search = screen.getByRole("searchbox", { name: "Search" });
+    fireEvent.pointerDown(search);
+    act(() => search.focus());
+    fireEvent.change(search, { target: { value: "draft" } });
+    expect(screen.getByRole("dialog", { name: "GPT-4o" })).toBeTruthy();
+    expect(modelRows()).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Edit draft-model" }));
+    await waitFor(() => {
+      expect(screen.getAllByRole("dialog")).toHaveLength(1);
+      expect(screen.getByRole("dialog", { name: "draft-model" })).toBeTruthy();
+    });
+    expect(
+      screen.getByRole("textbox", { name: "Display name" }),
+    ).toHaveProperty("value", "");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("protects a dirty draft before switching to another information card", async () => {
+    await renderPage([GATEWAY], 2);
+    fireEvent.click(screen.getByRole("button", { name: "Edit GPT-4o" }));
+    const input = screen.getByRole("textbox", { name: "Display name" });
+    fireEvent.change(input, { target: { value: "Unsaved" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "View the card of draft-model" }),
+    );
+    let notice = await screen.findByRole("alertdialog");
+    expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
+    fireEvent.click(within(notice).getByRole("button", { name: "Cancel" }));
+    expect(input).toHaveProperty("value", "Unsaved");
+    expect(screen.getByRole("dialog", { name: "Unsaved" })).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "View the card of draft-model" }),
+    );
+    notice = await screen.findByRole("alertdialog");
+    fireEvent.click(
+      within(notice).getByRole("button", { name: "Discard changes" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "draft-model" }),
+    ).toBeTruthy();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(screen.queryByRole("textbox", { name: "Display name" })).toBeNull();
+    expect(updateProviderMock).not.toHaveBeenCalled();
+  });
+
+  it("guards background deletions before an editor can overwrite the provider document", async () => {
+    await renderPage([GATEWAY], 2);
+    updateProviderMock.mockImplementation(({ id, provider }) =>
+      Promise.resolve({ ...provider, id }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit GPT-4o" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Display name" }), {
+      target: { value: "Unsaved" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "draft-model" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove model" }));
+    let notice = await screen.findByRole("alertdialog");
+    expect(updateProviderMock).not.toHaveBeenCalled();
+    fireEvent.click(within(notice).getByRole("button", { name: "Cancel" }));
+    expect(
+      screen.getByRole("textbox", { name: "Display name" }),
+    ).toHaveProperty("value", "Unsaved");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove model" }));
+    notice = await screen.findByRole("alertdialog");
+    fireEvent.click(
+      within(notice).getByRole("button", { name: "Discard changes" }),
+    );
+    await waitFor(() => expect(updateProviderMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const written = updateProviderMock.mock.calls[0]?.[0].provider;
+    expect(written?.models).toEqual([GATEWAY.models?.[0]]);
+  });
+
+  it.each(["success", "failure"])(
+    "opens a queued editor after the post-save catalog read reports %s",
+    async (readResult) => {
+      await renderPage([GATEWAY], 2);
+      let stored = GATEWAY;
+      const saving = deferred<Provider>();
+      if (readResult === "success") {
+        listProvidersMock.mockImplementation(() =>
+          Promise.resolve({ providers: [stored] }),
+        );
+      } else {
+        listProvidersMock.mockRejectedValue({
+          code: "db",
+          message: "catalog read failed",
+        });
+      }
+      updateProviderMock
+        .mockImplementationOnce(() =>
+          saving.promise.then((provider) => {
+            stored = provider;
+            return provider;
+          }),
+        )
+        .mockImplementation(({ id, provider }) => {
+          stored = { ...provider, id };
+          return Promise.resolve(stored);
+        });
+      fireEvent.click(screen.getByRole("button", { name: "Edit GPT-4o" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Display name" }), {
+        target: { value: "Saved first model" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(updateProviderMock).toHaveBeenCalledTimes(1));
+      fireEvent.click(screen.getByRole("button", { name: "Edit draft-model" }));
+      expect(
+        screen.getByRole("dialog", { name: "Saved first model" }),
+      ).toBeTruthy();
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      await act(async () => {
+        saving.resolve({
+          ...GATEWAY,
+          models: (GATEWAY.models ?? []).map((model) =>
+            model.id === "gpt-4o"
+              ? { ...model, name: "Saved first model" }
+              : model,
+          ),
+        });
+        await saving.promise;
+      });
+      expect(
+        await screen.findByRole("dialog", { name: "draft-model" }),
+      ).toBeTruthy();
+      fireEvent.change(screen.getByRole("textbox", { name: "Display name" }), {
+        target: { value: "Saved second model" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(updateProviderMock).toHaveBeenCalledTimes(2));
+      const written = updateProviderMock.mock.calls[1]?.[0].provider;
+      expect(written?.models?.map((model) => model.name)).toEqual([
+        "Saved first model",
+        "Saved second model",
+      ]);
+    },
+  );
 });

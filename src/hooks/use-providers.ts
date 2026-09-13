@@ -172,7 +172,19 @@ export function useUpdateProvider() {
   return useProviderMutation<Provider, UpdateProviderParams>({
     mutationFn: updateProvider,
     networkMode: "always",
-    onSuccess: async () => {
+    onSuccess: async (provider) => {
+      // A failed refresh must not expose the pre-commit document to the next
+      // editor. Cancel first so an older fetch cannot revert this merge.
+      await queryClient.cancelQueries({ queryKey: providersKeys.all });
+      queryClient.setQueryData<Providers>(providersKeys.all, (current) =>
+        current === undefined
+          ? undefined
+          : {
+              providers: current.providers.map((item) =>
+                item.id === provider.id ? provider : item,
+              ),
+            },
+      );
       await invalidateProviderWrites(queryClient);
     },
     retry: false,

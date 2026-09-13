@@ -18,7 +18,11 @@ export function CompatResolutionNotice({
     >
       <span>{t("settings.providers.compatResolutionFailed")}</span>
       <Button
-        onClick={resolution.retry}
+        aria-disabled={resolution.isLoading}
+        className="aria-disabled:opacity-50"
+        onClick={() => {
+          if (!resolution.isLoading) resolution.retry();
+        }}
         size="xs"
         type="button"
         variant="outline"

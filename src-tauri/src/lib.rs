@@ -7,6 +7,7 @@ mod error;
 mod provider;
 mod state;
 mod types;
+mod window_lifecycle;
 
 use tauri::Manager;
 
@@ -27,7 +28,7 @@ pub fn run() {
         // excluded on purpose: with it, the plugin shows the window pre-paint
         // at the pre-restore frame, which macOS renders before applying the
         // restored position — a visible flash. The frontend reveals the window
-        // after its first paint (App.tsx).
+        // after its initial theme and background synchronization.
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 // The settings window's placement is recomputed on every open
@@ -64,6 +65,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .manage(window_lifecycle::WindowLifecycle::default())
         .invoke_handler(commands::handler())
         .setup(|app| {
             let connection = db::init(app.handle())?;
@@ -72,26 +74,27 @@ pub fn run() {
             // macOS requires an application menu for standard accelerators to work.
             #[cfg(target_os = "macos")]
             {
-                let menu = tauri::menu::Menu::default(app.handle())?;
-                app.set_menu(menu)?;
+                window_lifecycle::install_menu(app.handle())?;
             }
 
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building Nostra")
-        .run(|_app, event| match event {
-            // Dock-click fallback: the frontend shows the window on mount, but
-            // if that path ever fails the user must not be left with a hidden
-            // window and a dead dock icon. Non-macOS builds compile this arm
-            // out, leaving _app unused there (underscore prefix covers both).
-            #[cfg(target_os = "macos")]
-            tauri::RunEvent::Reopen { .. } => {
-                if let Some(window) = _app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+        .run(|app, event| {
+            window_lifecycle::on_event(app, &event);
+            match event {
+                // Dock-click fallback: the frontend shows the window on mount, but
+                // if that path ever fails the user must not be left with a hidden
+                // window and a dead dock icon.
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen { .. } => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
                 }
+                _ => {}
             }
-            _ => {}
         });
 }

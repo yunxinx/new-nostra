@@ -2,7 +2,11 @@ import i18next from "i18next";
 
 import type { Language } from "@/lib/i18n";
 
-import { getPreference, PREFERENCE_KEYS } from "@/lib/ipc/preferences";
+import {
+  getPreference,
+  PREFERENCE_KEYS,
+  type PreferenceKey,
+} from "@/lib/ipc/preferences";
 import { type ThemeOverride, useUiStore } from "@/stores/ui-store";
 
 const THEME_OVERRIDES = ["dark", "light", "system"] as const;
@@ -14,11 +18,13 @@ const THEME_OVERRIDES = ["dark", "light", "system"] as const;
  * absent or invalid values keep the defaults.
  */
 export async function hydrateSharedPreferences(): Promise<void> {
-  const themeOverride = await getPreference(PREFERENCE_KEYS.themeOverride);
+  const [themeOverride, language] = await Promise.all([
+    readPreference(PREFERENCE_KEYS.themeOverride),
+    readPreference(PREFERENCE_KEYS.language),
+  ]);
   if (isThemeOverride(themeOverride)) {
     useUiStore.getState().setThemeOverride(themeOverride);
   }
-  const language = await getPreference(PREFERENCE_KEYS.language);
   if (isLanguage(language)) {
     await i18next.changeLanguage(language);
   }
@@ -29,11 +35,13 @@ export async function hydrateSharedPreferences(): Promise<void> {
  * only); width passes through the store's 220..440 clamp.
  */
 export async function hydrateSidebarGeometry(): Promise<void> {
-  const width = await getPreference(PREFERENCE_KEYS.sidebarWidth);
+  const [width, collapsed] = await Promise.all([
+    readPreference(PREFERENCE_KEYS.sidebarWidth),
+    readPreference(PREFERENCE_KEYS.sidebarCollapsed),
+  ]);
   if (typeof width === "number" && Number.isFinite(width)) {
     useUiStore.getState().setSidebarWidth(width);
   }
-  const collapsed = await getPreference(PREFERENCE_KEYS.sidebarCollapsed);
   if (typeof collapsed === "boolean") {
     useUiStore.getState().setSidebarCollapsed(collapsed);
   }
@@ -50,4 +58,13 @@ function isThemeOverride(value: unknown): value is ThemeOverride {
     typeof value === "string" &&
     (THEME_OVERRIDES as readonly string[]).includes(value)
   );
+}
+
+async function readPreference(key: PreferenceKey): Promise<unknown> {
+  try {
+    return await getPreference(key);
+  } catch (error) {
+    console.error(`Preference ${key} hydration failed`, error);
+    return undefined;
+  }
 }

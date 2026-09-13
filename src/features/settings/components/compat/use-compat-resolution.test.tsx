@@ -52,6 +52,33 @@ afterEach(() => {
 });
 
 describe("compat resolution", () => {
+  it("keeps same-input retry feedback and clears it immediately when the input changes", async () => {
+    resolveCompatMock.mockRejectedValueOnce(new Error("preview failed"));
+    const { rerender, result } = renderHook(
+      ({ input }: { input: CompatResolutionInput }) =>
+        useCompatResolution(["openai-completions"], input),
+      { initialProps: { input: inputWith("https://first.example") } },
+    );
+    expect(result.current.isInitialLoading).toBe(true);
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
+    expect(result.current.isInitialLoading).toBe(false);
+    let resolveRetry: (value: ResolvedCompat) => void = () => undefined;
+    const pending = new Promise<ResolvedCompat>((resolve) => {
+      resolveRetry = resolve;
+    });
+    resolveCompatMock.mockReturnValue(pending);
+    act(() => result.current.retry());
+    expect(result.current.isInitialLoading).toBe(false);
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.error?.message).toBe("preview failed");
+    rerender({ input: inputWith("https://second.example") });
+    expect(result.current.error).toBeNull();
+    await act(async () => {
+      resolveRetry(RESOLUTION);
+      await pending;
+    });
+  });
+
   it("resolves every family with the settled draft", async () => {
     resolveCompatMock.mockResolvedValue(RESOLUTION);
     const families = ["anthropic-messages", "openai-completions"] as const;

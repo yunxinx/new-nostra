@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ModelEntry, Provider } from "@/types/ipc";
@@ -20,6 +20,7 @@ import {
 import { modelEntrySchema } from "../../schemas/provider";
 
 interface ModelEditPanelProps {
+  anchor: HTMLElement;
   isNavRequested?: boolean;
   onClose: () => void;
   onNavRequestResolved?: ((accepted: boolean) => void) | undefined;
@@ -40,6 +41,7 @@ interface ModelEditTarget {
  * provider's full replace with one row swapped.
  */
 export function ModelEditPanel({
+  anchor,
   isNavRequested = false,
   onClose,
   onNavRequestResolved,
@@ -47,6 +49,7 @@ export function ModelEditPanel({
 }: ModelEditPanelProps) {
   const { t } = useTranslation();
   const update = useUpdateProvider();
+  const isSaving = update.isPending || update.isSuccess;
   const [model, setModel] = useState(target.model);
   const [editor, setEditor] = useState(() => modelEditorState(target.model));
   const hasInvalidInputs = hasInvalidCompatInputs(editor.compatInputs);
@@ -56,7 +59,7 @@ export function ModelEditPanel({
   const guard = useDraftGuard({
     isChanged,
     isNavRequested,
-    isSaving: update.isPending,
+    isSaving,
     onLeave: onClose,
     onNavRequestResolved,
   });
@@ -64,28 +67,32 @@ export function ModelEditPanel({
   // stored one: what the panel edits is the row, not the provider.
   const providerDraft = providerToDraft(target.provider);
 
+  useEffect(() => {
+    // The parent may have received a switch request while the save refreshed
+    // the catalogue, so completion must use the current parent callback.
+    if (update.isSuccess) onClose();
+  }, [onClose, update.isSuccess]);
+
   function handleSave(): void {
-    if (update.isPending || hasInvalidInputs) return;
+    if (isSaving || hasInvalidInputs) return;
     const parsed = modelEntrySchema.safeParse(model);
     setIsRefused(!parsed.success);
     if (!parsed.success) return;
     update.reset();
-    update.mutate(
-      {
-        id: target.provider.id,
-        provider: {
-          ...providerDraft,
-          models: (providerDraft.models ?? []).map((entry, position) =>
-            position === target.index ? model : entry,
-          ),
-        },
+    update.mutate({
+      id: target.provider.id,
+      provider: {
+        ...providerDraft,
+        models: (providerDraft.models ?? []).map((entry, position) =>
+          position === target.index ? model : entry,
+        ),
       },
-      { onSuccess: onClose },
-    );
+    });
   }
 
   return (
     <FloatingPanel
+      anchor={anchor}
       footer={
         <>
           {isRefused && (
@@ -107,7 +114,7 @@ export function ModelEditPanel({
             </p>
           )}
           <Button
-            disabled={update.isPending}
+            disabled={isSaving}
             onClick={guard.requestLeave}
             size="sm"
             type="button"
@@ -116,12 +123,12 @@ export function ModelEditPanel({
             {t("common.cancel")}
           </Button>
           <Button
-            disabled={!isChanged || update.isPending || hasInvalidInputs}
+            disabled={!isChanged || isSaving || hasInvalidInputs}
             onClick={handleSave}
             size="sm"
             type="button"
           >
-            {update.isPending ? t("common.saving") : t("common.save")}
+            {isSaving ? t("common.saving") : t("common.save")}
           </Button>
         </>
       }
@@ -138,7 +145,7 @@ export function ModelEditPanel({
         onConfirm={guard.confirm}
         open={guard.isBlocked}
       />
-      <fieldset className="min-w-0" disabled={update.isPending}>
+      <fieldset className="min-w-0" disabled={isSaving}>
         <ModelDetail
           baseline={target.model}
           chrome="panel"

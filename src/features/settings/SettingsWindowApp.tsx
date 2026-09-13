@@ -1,4 +1,3 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "cn";
 import {
   Boxes,
@@ -10,12 +9,13 @@ import {
   Server,
   Settings2,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { QueryNotice } from "@/components/common/QueryNotice";
 import { SidebarToggleButton } from "@/components/common/SidebarToggleButton";
 import { TitleBarControls } from "@/components/common/TitleBarControls";
-import { useTheme } from "@/features/appearance/use-theme";
+import { useWindowAppearance } from "@/features/appearance/use-window-appearance";
 import { useUiStore } from "@/stores/ui-store";
 
 import { AboutPage } from "./components/AboutPage";
@@ -24,6 +24,7 @@ import { GeneralPage } from "./components/GeneralPage";
 import { ModelsListPage } from "./models/ModelsListPage";
 import { UnifiedModelsPage } from "./models/UnifiedModelsPage";
 import { ProvidersPage } from "./providers/ProvidersPage";
+import { useSettingsClose } from "./use-settings-close";
 
 // The navigation column in render order: page rows, a heading that opens the
 // model-services group, and the gateway group, whose children are the pages
@@ -43,6 +44,8 @@ const NAV_ITEMS = [
 
 type NavGroup = Extract<NavItem, { group: string }>;
 type NavItem = (typeof NAV_ITEMS)[number];
+type PendingAction = { kind: "close" } | { kind: "page"; page: SettingsPage };
+
 type SettingsPage =
   Extract<NavItem, { page: string }>["page"] | NavGroup["children"][number];
 
@@ -85,42 +88,47 @@ interface NavRowProps {
 
 export function SettingsWindowApp() {
   const { t } = useTranslation();
-  useTheme();
   const [activePage, setActivePage] = useState<SettingsPage>("general");
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
-  const [requestedPage, setRequestedPage] = useState<null | SettingsPage>(null);
+  const [pendingAction, setPendingAction] = useState<null | PendingAction>(
+    null,
+  );
+  const close = useSettingsClose(() => {
+    setPendingAction((current) =>
+      current?.kind === "close" ? current : { kind: "close" },
+    );
+  });
+  useWindowAppearance(close.registrationStatus !== "pending");
   const navCollapsed = useUiStore((s) => s.settingsNavCollapsed);
   const toggleNavCollapsed = useUiStore((s) => s.toggleSettingsNavCollapsed);
+  const acceptUnblockedClose = useEffectEvent(() => resolveNavRequest(true));
 
-  // The window is created hidden. WebKit never schedules
-  // requestAnimationFrame while the host window is ordered out, so a
-  // rAF-gated show() would deadlock; reveal must not depend on rAF.
-  // setFocus after show: tao's set_focus is a no-op on hidden windows, so
-  // it must run once show() resolves; on macOS it also performs the
-  // app-level activation (activateIgnoringOtherApps). Both calls are
-  // idempotent under StrictMode double-mount.
   useEffect(() => {
-    void getCurrentWindow()
-      .show()
-      .then(() => void getCurrentWindow().setFocus());
-  }, []);
+    if (pendingAction?.kind === "close" && !hasDraftGuard(activePage)) {
+      acceptUnblockedClose();
+    }
+  }, [activePage, pendingAction]);
 
   function requestPage(page: SettingsPage): void {
-    if (page === activePage) {
+    if (page === activePage || pendingAction?.kind === "close") {
       return;
     }
-    if (["modelsList", "modelsUnified", "providers"].includes(activePage)) {
-      setRequestedPage(page);
+    if (hasDraftGuard(activePage)) {
+      setPendingAction({ kind: "page", page });
       return;
     }
     setActivePage(page);
   }
 
   function resolveNavRequest(accepted: boolean): void {
-    if (accepted && requestedPage !== null) {
-      setActivePage(requestedPage);
+    if (pendingAction?.kind === "close") {
+      close.resolve(accepted, () => setPendingAction(null));
+      return;
     }
-    setRequestedPage(null);
+    if (accepted && pendingAction?.kind === "page") {
+      setActivePage(pendingAction.page);
+    }
+    setPendingAction(null);
   }
 
   function toggleGroup(group: NavGroup): void {
@@ -128,6 +136,19 @@ export function SettingsWindowApp() {
       collapsed.includes(group.group)
         ? collapsed.filter((name) => name !== group.group)
         : [...collapsed, group.group],
+    );
+  }
+
+  if (close.registrationStatus !== "ready") {
+    return (
+      <div className="bg-background relative flex h-screen flex-col px-4">
+        <div className="h-[34px] shrink-0" data-tauri-drag-region />
+        <QueryNotice
+          error={close.registrationError}
+          isLoading={close.registrationStatus === "pending"}
+          onRetry={close.retryRegistration}
+        />
+      </div>
     );
   }
 
@@ -185,6 +206,19 @@ export function SettingsWindowApp() {
         </nav>
       </div>
       <main className="bg-background flex min-w-0 flex-1 flex-col">
+        {close.error !== null && (
+          <QueryNotice
+            error={close.error}
+            isLoading={false}
+            onRetry={() => {
+              if (close.isCancellationError) {
+                close.resolve(false, () => setPendingAction(null));
+              } else {
+                setPendingAction({ kind: "close" });
+              }
+            }}
+          />
+        )}
         {/* Reserved title row: drag surface for the content column. The
             provider page reserves one per column instead, because its divider
             has to reach the window's top edge. */}
@@ -195,7 +229,7 @@ export function SettingsWindowApp() {
           // The provider page owns two independently scrolling columns, so it
           // sits outside the shared form scroll container.
           <ProvidersPage
-            isNavRequested={requestedPage !== null}
+            isNavRequested={pendingAction !== null}
             onNavRequestResolved={resolveNavRequest}
           />
         ) : activePage === "modelsList" || activePage === "modelsUnified" ? (
@@ -205,12 +239,12 @@ export function SettingsWindowApp() {
           <>
             {activePage === "modelsList" ? (
               <ModelsListPage
-                isNavRequested={requestedPage !== null}
+                isNavRequested={pendingAction !== null}
                 onNavRequestResolved={resolveNavRequest}
               />
             ) : (
               <UnifiedModelsPage
-                isNavRequested={requestedPage !== null}
+                isNavRequested={pendingAction !== null}
                 onNavRequestResolved={resolveNavRequest}
               />
             )}
@@ -242,6 +276,10 @@ export function SettingsWindowApp() {
       </TitleBarControls>
     </div>
   );
+}
+
+function hasDraftGuard(page: SettingsPage): boolean {
+  return ["modelsList", "modelsUnified", "providers"].includes(page);
 }
 
 // A group row: the whole row toggles its children and nothing else. Opening a

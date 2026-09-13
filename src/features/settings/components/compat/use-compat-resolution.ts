@@ -18,6 +18,7 @@ export const COMPAT_RESOLVE_DEBOUNCE_MS = 250;
 export interface CompatResolution {
   data: Partial<Record<ProtocolFamily, ResolvedCompat>>;
   error: Error | null;
+  isInitialLoading: boolean;
   isLoading: boolean;
   retry: () => void;
 }
@@ -63,9 +64,7 @@ export function useCompatResolution(
       // consumers recreate the input object and the family list on unrelated
       // renders (a model row edit rebuilds both).
       setSettled((current) =>
-        sameFamilies(current.families, families) &&
-        current.input.provider === input.provider &&
-        current.input.model === input.model
+        sameResolutionInput(current, families, input)
           ? current
           : { families: [...families], input },
       );
@@ -114,12 +113,14 @@ export function useCompatResolution(
 
   return {
     data: result?.data ?? {},
-    error: result?.input === settled ? result.error : null,
+    error:
+      result !== null && sameResolutionInput(result.input, families, input)
+        ? result.error
+        : null,
+    isInitialLoading: result === null,
     isLoading:
       result?.input !== settled ||
-      !sameFamilies(settled.families, families) ||
-      settled.input.provider !== input.provider ||
-      settled.input.model !== input.model,
+      !sameResolutionInput(settled, families, input),
     retry: () => setSettled((current) => ({ ...current })),
   };
 }
@@ -132,5 +133,17 @@ function sameFamilies(
   return (
     left.length === right.length &&
     left.every((family, index) => family === right[index])
+  );
+}
+
+function sameResolutionInput(
+  settled: SettledResolution,
+  families: readonly ProtocolFamily[],
+  input: CompatResolutionInput,
+): boolean {
+  return (
+    sameFamilies(settled.families, families) &&
+    settled.input.provider === input.provider &&
+    settled.input.model === input.model
   );
 }
