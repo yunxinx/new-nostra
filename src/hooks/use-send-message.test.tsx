@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-query";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import type {
   AppError,
@@ -20,6 +20,7 @@ import type {
 } from "@/types/ipc";
 
 import { useActivePath } from "@/features/chat/hooks/use-active-path";
+import { initI18n } from "@/lib/i18n";
 import { type MessageWindow } from "@/lib/message-window";
 import { messagesKeys, sessionsKeys } from "@/lib/query-keys";
 import { type SessionListData } from "@/lib/session-list-cache";
@@ -32,6 +33,8 @@ import { type SendTarget, useSendMessage } from "./use-send-message";
 // the cache merge/reset decisions, and the DB-success vs read-failure split.
 
 const NOW = "2026-09-09T00:00:00.000Z";
+
+beforeAll(initI18n);
 
 let queryClient: QueryClient;
 let createParams: Array<{ content: ContentBlock[]; title: string }>;
@@ -272,6 +275,11 @@ describe("useSendMessage first send", () => {
       draftId: 1,
       drafts: new Map([[draftKeyFor(1), "Hello world"]]),
     });
+    useUiStore.getState().setModel(draftKeyFor(1), {
+      kind: "provider",
+      modelId: "m1",
+      providerId: "p1",
+    });
     seedListCaches();
     const { result } = renderSendHarness(null);
 
@@ -291,6 +299,12 @@ describe("useSendMessage first send", () => {
       expect(useUiStore.getState().activeSessionId).toBe("s-new-1");
     });
     expect(useUiStore.getState().drafts.get(draftKeyFor(1))).toBeUndefined();
+    expect(useUiStore.getState().modelByDraft.get("s-new-1")).toEqual({
+      kind: "provider",
+      modelId: "m1",
+      providerId: "p1",
+    });
+    expect(useUiStore.getState().modelByDraft.has(draftKeyFor(1))).toBe(false);
     expect(useUiStore.getState().pendingSubmits.has(draftKeyFor(1))).toBe(
       false,
     );

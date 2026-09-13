@@ -15,11 +15,24 @@ import type { ProtocolFamily } from "./compat-fields";
  */
 export const COMPAT_RESOLVE_DEBOUNCE_MS = 250;
 
+export interface CompatResolution {
+  data: Partial<Record<ProtocolFamily, ResolvedCompat>>;
+  error: Error | null;
+  isLoading: boolean;
+  retry: () => void;
+}
+
 export interface CompatResolutionInput {
   /** Model draft of a model-level view; absent asks for the provider view. */
   model?: ModelEntry;
   /** Draft the resolution reads: the base URL drives detection, compat merges. */
   provider: ProviderDraft;
+}
+
+interface ResolutionResult {
+  data: CompatResolution["data"];
+  error: Error | null;
+  input: SettledResolution;
 }
 
 interface SettledResolution {
@@ -30,21 +43,18 @@ interface SettledResolution {
 /**
  * Effective compat per protocol family from `resolve_compat`, one entry per
  * family once resolved (a family missing from the result is not resolved yet).
- * The call is a pure function over the submitted drafts, so a draft the schema
- * would reject still resolves: the panel shows values for whatever the form
- * currently holds.
+ * Drafts can fail IPC decoding before the resolver runs; failures clear the
+ * effective values and remain retryable until the input changes.
  */
 export function useCompatResolution(
   families: readonly ProtocolFamily[],
   input: CompatResolutionInput,
-): Partial<Record<ProtocolFamily, ResolvedCompat>> {
+): CompatResolution {
   const [settled, setSettled] = useState<SettledResolution>(() => ({
     families: [...families],
     input,
   }));
-  const [resolved, setResolved] = useState<
-    Partial<Record<ProtocolFamily, ResolvedCompat>>
-  >({});
+  const [result, setResult] = useState<null | ResolutionResult>(null);
   const latest = useRef(0);
 
   useEffect(() => {
@@ -70,31 +80,48 @@ export function useCompatResolution(
     const request = latest.current;
     const { input: draft } = settled;
     void (async () => {
-      const entries = await Promise.all(
-        settled.families.map(async (family) => {
-          const resolution = await resolveCompat({
-            protocol: family,
-            provider: draft.provider,
-            ...(draft.model !== undefined && { model: draft.model }),
-          });
-          return { family, resolution };
-        }),
-      );
-      if (request !== latest.current) {
-        return;
+      try {
+        const entries = await Promise.all(
+          settled.families.map(async (family) => {
+            const resolution = await resolveCompat({
+              protocol: family,
+              provider: draft.provider,
+              ...(draft.model !== undefined && { model: draft.model }),
+            });
+            return { family, resolution };
+          }),
+        );
+        if (request !== latest.current) return;
+        const data: CompatResolution["data"] = {};
+        for (const entry of entries) data[entry.family] = entry.resolution;
+        setResult({ data, error: null, input: settled });
+      } catch (error: unknown) {
+        if (request !== latest.current) return;
+        setResult({
+          data: {},
+          error:
+            error instanceof Error
+              ? error
+              : new Error("Compatibility resolution failed"),
+          input: settled,
+        });
       }
-      const next: Partial<Record<ProtocolFamily, ResolvedCompat>> = {};
-      for (const entry of entries) {
-        next[entry.family] = entry.resolution;
-      }
-      setResolved(next);
     })();
     return () => {
       latest.current += 1;
     };
   }, [settled]);
 
-  return resolved;
+  return {
+    data: result?.data ?? {},
+    error: result?.input === settled ? result.error : null,
+    isLoading:
+      result?.input !== settled ||
+      !sameFamilies(settled.families, families) ||
+      settled.input.provider !== input.provider ||
+      settled.input.model !== input.model,
+    retry: () => setSettled((current) => ({ ...current })),
+  };
 }
 
 /** Whether two family lists hold the same protocols in the same order. */

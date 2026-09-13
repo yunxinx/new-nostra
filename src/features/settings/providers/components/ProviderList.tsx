@@ -63,16 +63,21 @@ export function ProviderList({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="relative shrink-0 p-2">
-        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-4 size-3.5 -translate-y-1/2" />
-        <Input
-          aria-label={t("settings.providers.search")}
-          className="pl-7"
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder={t("settings.providers.search")}
-          type="search"
-          value={search}
-        />
+      <div className="shrink-0 px-2 pb-2">
+        {/* The icon is placed against the field's own box, not against this
+            padded wrapper: centring it on the wrapper would put it below the
+            field's middle by half the padding. */}
+        <div className="relative">
+          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2" />
+          <Input
+            aria-label={t("settings.providers.search")}
+            className="pl-7"
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={t("settings.providers.search")}
+            type="search"
+            value={search}
+          />
+        </div>
       </div>
       {/* Same 8px inset on both sides as the search field above, so a row
           starts and ends on that field's lines. The inset is padding rather
@@ -81,7 +86,7 @@ export function ProviderList({
           scrollbar strip under the list, and the gutter's width is not the
           styled scrollbar's, so the two insets never match. `overflow-x-clip`
           keeps a stray horizontal overflow from adding a second scrollbar. */}
-      <div className="min-h-0 flex-1 overflow-x-clip overflow-y-auto px-2 pb-2">
+      <div className="min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto px-2 pb-2">
         {isLoading ? null : error !== null ? (
           <ListError error={error} retry={retry} />
         ) : (

@@ -153,6 +153,7 @@ export function useSendMessage(): SendMessageResult {
     });
     useUiStore.getState().setEnteringSession(created.session.id);
     const store = useUiStore.getState();
+    store.transferDraftModel(variables.target.draftKey, created.session.id);
     // The new session takes over the view only while the user still sits on
     // the same draft; otherwise it just appears in the sidebar and the
     // current selection stays untouched.

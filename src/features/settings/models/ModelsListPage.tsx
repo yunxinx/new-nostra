@@ -1,4 +1,3 @@
-import { cn } from "cn";
 import { IdCard, Pencil, Search, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -6,19 +5,16 @@ import { useTranslation } from "react-i18next";
 import type { ModelEntry, Provider } from "@/types/ipc";
 
 import { BulkActionBar } from "@/components/common/BulkActionBar";
-import {
-  DataTablePanel,
-  STICKY_TABLE_HEADER,
-} from "@/components/common/DataTablePanel";
+import { DataTablePanel } from "@/components/common/DataTablePanel";
 import { FacetedFilter } from "@/components/common/FacetedFilter";
 import { QueryNotice } from "@/components/common/QueryNotice";
 import { useRowSelection } from "@/components/common/use-row-selection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -47,7 +43,10 @@ import { formatRate, priceSummary } from "./model-pricing";
 import { useBatchDelete } from "./use-batch-delete";
 
 /** Every column a row and a group row both span. */
-const COLUMN_COUNT = 6;
+const COLUMN_COUNT = 5;
+
+/** One width per column; the protocols take what is left. */
+const COLUMNS = ["w-10", "w-64", undefined, "w-32", "w-20"];
 
 interface ModelEditTarget {
   index: number;
@@ -83,7 +82,13 @@ export function ModelsListPage({
   const [card, setCard] = useState<AggregateRow | null>(null);
   const selection = useRowSelection();
 
-  const rows = useMemo(() => aggregateRows(providers), [providers]);
+  // A disabled provider answers nothing, so its models are not part of the
+  // catalogue this page is: a price and a protocol set you cannot call are
+  // noise in a list whose question is "what can I send a request to".
+  const rows = useMemo(
+    () => aggregateRows(providers).filter((row) => row.provider.enabled),
+    [providers],
+  );
   const filtered = useMemo(
     () =>
       rows.filter((row) =>
@@ -154,9 +159,13 @@ export function ModelsListPage({
     void batch.run(targets, (keys) => selection.setMany(keys, false));
   }
 
+  // The same 8px inset on three sides as the provider list's column: the
+  // search field, the table and the window's edge share one line, and the
+  // toolbar keeps no top inset of its own — the title strip above it is
+  // already the page's top edge.
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col px-10 pb-6">
-      <div className="flex flex-wrap items-center gap-2 py-3">
+    <div className="relative flex min-h-0 flex-1 flex-col px-2 pb-2">
+      <div className="flex flex-wrap items-center gap-2 pb-2">
         <div className="relative w-56">
           <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2" />
           <Input
@@ -171,7 +180,7 @@ export function ModelsListPage({
         <FacetedFilter
           onChange={setProviderIds}
           options={providerOptions}
-          title={t("settings.models.filterProvider")}
+          title={t("common.filterProvider")}
           values={providerIds}
         />
         <FacetedFilter
@@ -180,9 +189,11 @@ export function ModelsListPage({
           title={t("common.filterProtocol")}
           values={protocols}
         />
-        <span className="text-muted-foreground ml-auto text-xs tabular-nums">
+        {/* A surface, not a caption: the count answers "how many did the
+            filters leave", which is a result to read, not a label. */}
+        <Badge className="ml-auto" variant="secondary">
           {t("settings.models.count", { count: filtered.length })}
-        </span>
+        </Badge>
       </div>
       <QueryNotice error={error} isLoading={isLoading} onRetry={retry} />
       {batch.failures.length > 0 && (
@@ -192,14 +203,12 @@ export function ModelsListPage({
           })}
         </p>
       )}
-      <DataTablePanel>
-        <Table
-          className="table-fixed"
-          containerClassName="h-full overflow-y-auto"
-        >
-          <TableHeader className={STICKY_TABLE_HEADER}>
+      <DataTablePanel
+        columns={COLUMNS}
+        header={
+          <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-10">
+              <TableHead>
                 <span className="sr-only">{t("common.selectAll")}</span>
                 <div className="flex justify-center">
                   <Checkbox
@@ -223,76 +232,69 @@ export function ModelsListPage({
                 </div>
               </TableHead>
               <TableHead>{t("settings.models.model")}</TableHead>
-              <TableHead className="w-48">
-                {t("settings.models.protocols")}
-              </TableHead>
-              <TableHead className="w-32">
-                {t("settings.models.pricing")}
-              </TableHead>
-              <TableHead className="w-24">
-                {t("settings.models.availability")}
-              </TableHead>
-              <TableHead className="w-20 text-center">
+              <TableHead>{t("settings.models.protocols")}</TableHead>
+              <TableHead>{t("settings.models.pricing")}</TableHead>
+              <TableHead className="text-center">
                 {t("common.actions")}
               </TableHead>
             </TableRow>
           </TableHeader>
-          <TableBody>
-            {sections.map(({ provider, rows: group }) => (
-              <Fragment key={provider.id}>
-                {/* One table, one heading per provider: the group row spans
+        }
+      >
+        <TableBody>
+          {sections.map(({ provider, rows: group }) => (
+            <Fragment key={provider.id}>
+              {/* One table, one heading per provider: the group row spans
                     every column, so a row never repeats the provider its model
                     belongs to. */}
-                <TableRow className="bg-muted/40 hover:bg-muted/40">
-                  <TableCell
-                    className="py-1 text-xs font-medium"
-                    colSpan={COLUMN_COUNT}
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="truncate">{provider.name}</span>
-                      <span className="text-muted-foreground font-normal tabular-nums">
-                        {t("settings.models.count", { count: group.length })}
-                      </span>
-                    </span>
-                  </TableCell>
-                </TableRow>
-                {group.map((row) => (
-                  <ModelListRow
-                    isSelected={selection.isSelected(rowKey(row))}
-                    key={rowKey(row)}
-                    model={row.model}
-                    onEdit={() =>
-                      setEdit({
-                        index: (provider.models ?? []).findIndex(
-                          (entry) => entry.id === row.model.id,
-                        ),
-                        model: row.model,
-                        provider,
-                      })
-                    }
-                    onOpenCard={() => setCard(row)}
-                    onToggle={() => selection.toggle(rowKey(row))}
-                    providerEnabled={provider.enabled}
-                  />
-                ))}
-              </Fragment>
-            ))}
-            {!isLoading && error === null && filtered.length === 0 && (
-              <TableRow className="hover:bg-transparent">
+              <TableRow className="bg-muted/40 hover:bg-muted/40">
                 <TableCell
-                  className="text-muted-foreground py-6 text-center text-sm"
+                  className="py-1 text-xs font-medium"
                   colSpan={COLUMN_COUNT}
                 >
-                  {t(
-                    rows.length === 0
-                      ? "settings.models.emptyLibrary"
-                      : "settings.models.noResults",
-                  )}
+                  <span className="flex items-center gap-2">
+                    <span className="truncate">{provider.name}</span>
+                    <span className="text-muted-foreground font-normal tabular-nums">
+                      {t("settings.models.count", { count: group.length })}
+                    </span>
+                  </span>
                 </TableCell>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
+              {group.map((row) => (
+                <ModelListRow
+                  isSelected={selection.isSelected(rowKey(row))}
+                  key={rowKey(row)}
+                  model={row.model}
+                  onEdit={() =>
+                    setEdit({
+                      index: (provider.models ?? []).findIndex(
+                        (entry) => entry.id === row.model.id,
+                      ),
+                      model: row.model,
+                      provider,
+                    })
+                  }
+                  onOpenCard={() => setCard(row)}
+                  onToggle={() => selection.toggle(rowKey(row))}
+                />
+              ))}
+            </Fragment>
+          ))}
+          {!isLoading && error === null && filtered.length === 0 && (
+            <TableRow className="hover:bg-transparent">
+              <TableCell
+                className="text-muted-foreground py-6 text-center text-sm"
+                colSpan={COLUMN_COUNT}
+              >
+                {t(
+                  rows.length === 0
+                    ? "settings.models.emptyLibrary"
+                    : "settings.models.noResults",
+                )}
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
       </DataTablePanel>
       <BulkActionBar count={selection.count} onClear={selection.clear}>
         <Button
@@ -331,14 +333,12 @@ function ModelListRow({
   onEdit,
   onOpenCard,
   onToggle,
-  providerEnabled,
 }: {
   isSelected: boolean;
   model: ModelEntry;
   onEdit: () => void;
   onOpenCard: () => void;
   onToggle: () => void;
-  providerEnabled: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -363,7 +363,7 @@ function ModelListRow({
           </span>
         </div>
       </TableCell>
-      <TableCell className="w-48">
+      <TableCell>
         {(model.apis ?? []).length === 0 ? (
           <span className="text-muted-foreground text-xs">
             {t("settings.models.noProtocol")}
@@ -372,7 +372,7 @@ function ModelListRow({
           <div className="flex flex-wrap gap-1">
             {(model.apis ?? []).map((family) => (
               <Badge key={family} variant="outline">
-                {t(`settings.providers.protocolsShort.${family}`, {
+                {t(`settings.providers.protocolsAbbr.${family}`, {
                   defaultValue: family,
                 })}
               </Badge>
@@ -381,27 +381,9 @@ function ModelListRow({
         )}
       </TableCell>
       <PriceCell cost={model.cost} />
-      <TableCell className="text-muted-foreground w-24 text-xs">
-        <span className="flex items-center gap-1.5">
-          {/* Reachability, not a status colour scale: the accent dot marks a
-              provider that is on, a muted one marks a provider that
-              is off. */}
-          <span
-            className={cn(
-              "size-1.5 shrink-0 rounded-full",
-              providerEnabled ? "bg-primary" : "bg-muted-foreground/40",
-            )}
-          />
-          {t(
-            providerEnabled
-              ? "settings.models.available"
-              : "settings.models.unavailable",
-          )}
-        </span>
-      </TableCell>
-      <TableCell className="w-20">
+      <TableCell>
         <div className="flex items-center justify-center gap-0.5">
-          <Button
+          <IconButton
             aria-label={t("settings.models.editModel", {
               model: modelDisplayName(model),
             })}
@@ -411,8 +393,8 @@ function ModelListRow({
             variant="ghost"
           >
             <Pencil className="size-3.5" />
-          </Button>
-          <Button
+          </IconButton>
+          <IconButton
             aria-label={t("settings.models.viewCard", {
               model: modelDisplayName(model),
             })}
@@ -422,7 +404,7 @@ function ModelListRow({
             variant="ghost"
           >
             <IdCard className="size-3.5" />
-          </Button>
+          </IconButton>
         </div>
       </TableCell>
     </TableRow>
@@ -439,15 +421,25 @@ function PriceCell({ cost }: { cost: ModelEntry["cost"] }) {
   const { t } = useTranslation();
   const summary = priceSummary(cost);
   if (summary === null) {
-    return (
-      <TableCell className="text-muted-foreground w-32 text-xs">—</TableCell>
-    );
+    return <TableCell className="text-muted-foreground text-xs">—</TableCell>;
   }
   return (
-    <TableCell className="w-32">
-      <Tooltip>
+    <TableCell>
+      {/* Shorter than the app's deliberate 1s: the price detail is the answer
+          to a question the column raises on sight, so it is a panel the
+          reader goes looking for rather than a flash to be guarded against. */}
+      <Tooltip delayDuration={TOOLTIP_PRICE_DELAY_MS}>
         <TooltipTrigger asChild>
-          <span className="flex min-w-0 cursor-default flex-wrap items-center gap-1">
+          {/* Inline, so the hover target is the badges and not the width of
+              the whole column: a block-level trigger would answer a hover
+              anywhere in the cell, far from anything that looks like a
+              detail. */}
+          <Button
+            className="h-auto max-w-full cursor-default flex-wrap justify-start gap-1 p-0"
+            size="xs"
+            type="button"
+            variant="ghost"
+          >
             <Badge className="font-normal" variant="secondary">
               {t("settings.models.usageBased")}
             </Badge>
@@ -463,25 +455,25 @@ function PriceCell({ cost }: { cost: ModelEntry["cost"] }) {
                 {t("settings.providers.modelCostPeak")}
               </Badge>
             )}
-          </span>
+          </Button>
         </TooltipTrigger>
-        <TooltipContent className="flex max-w-sm flex-col items-start gap-1.5">
-          <RateLines rates={summary.rates} />
+        <TooltipContent className="flex max-w-sm flex-col items-start gap-2">
+          <RateBlock
+            heading={t("settings.providers.costBase")}
+            rates={summary.rates}
+          />
           {summary.tiers.map((tier, index) => (
-            <div className="flex flex-col gap-0.5" key={index}>
-              <span className="text-muted-foreground text-xs">
-                {t("settings.providers.costTierAbove")} {tier.threshold}
-              </span>
-              <RateLines rates={tier.rates} />
-            </div>
+            <RateBlock
+              heading={`${t("settings.providers.costTierAbove")} ${tier.threshold}`}
+              key={index}
+              rates={tier.rates}
+            />
           ))}
           {summary.peak !== undefined && (
-            <div className="flex flex-col gap-0.5">
-              <span className="text-muted-foreground text-xs">
-                {t("settings.providers.modelCostPeak")}
-              </span>
-              <RateLines rates={summary.peak} />
-            </div>
+            <RateBlock
+              heading={t("settings.providers.modelCostPeak")}
+              rates={summary.peak}
+            />
           )}
         </TooltipContent>
       </Tooltip>
@@ -489,23 +481,36 @@ function PriceCell({ cost }: { cost: ModelEntry["cost"] }) {
   );
 }
 
-function RateLines({
+/** The hover delay of the price column's own detail. */
+const TOOLTIP_PRICE_DELAY_MS = 250;
+
+/** One named group of rates: a heading, then one rate per line. */
+function RateBlock({
+  heading,
   rates,
 }: {
+  heading: string;
   rates: Array<{ key: string; value: number }>;
 }) {
   const { t } = useTranslation();
   return (
-    <span className="flex flex-wrap gap-x-3 gap-y-0.5">
-      {rates.map((rate) => (
-        <span className="flex gap-1 whitespace-nowrap" key={rate.key}>
-          <span className="text-muted-foreground">
-            {t(`settings.providers.${rate.key}`)}
-          </span>
-          <span className="font-mono">{formatRate(rate.value)}</span>
-        </span>
-      ))}
-    </span>
+    <div className="flex w-full flex-col gap-0.5">
+      <span className="text-muted-foreground text-xs font-medium">
+        {heading}
+      </span>
+      <dl className="m-0 flex w-full flex-col gap-0.5">
+        {rates.map((rate) => (
+          <div className="flex w-full items-baseline gap-2" key={rate.key}>
+            <dt className="text-muted-foreground min-w-0 flex-1 text-xs">
+              {t(`settings.providers.${rate.key}`)}
+            </dt>
+            <dd className="font-mono text-xs tabular-nums">
+              {formatRate(rate.value)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }
 

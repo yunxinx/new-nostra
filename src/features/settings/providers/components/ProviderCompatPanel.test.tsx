@@ -7,6 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import i18next from "i18next";
+import { useMemo, useState } from "react";
 import { useForm, type UseFormReturn, useWatch } from "react-hook-form";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -21,6 +22,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { initI18n } from "@/lib/i18n";
 import { resolveCompat } from "@/lib/ipc/providers";
 
+import type { CompatInputDrafts } from "../../components/compat/compat-draft";
 import type {
   CompatFieldDescriptor,
   ProtocolFamily,
@@ -30,6 +32,7 @@ import {
   compatFieldsFor,
   knownCompatFamilies,
 } from "../../components/compat/compat-fields";
+import { useCompatResolution } from "../../components/compat/use-compat-resolution";
 import {
   anthropicMessagesCompatSchema,
   openaiCompletionsCompatSchema,
@@ -37,6 +40,7 @@ import {
   protocolFamilySchema,
 } from "../../schemas/compat";
 import {
+  BLANK_PROVIDER_DRAFT,
   type ProviderFormSubmission,
   type ProviderFormValues,
   toFormValues,
@@ -127,12 +131,26 @@ function fieldRow(family: ProtocolFamily, field: string): HTMLElement {
 // The panel over a real form plus a probe that renders the current compat map,
 // so the tests read what the panel wrote without reaching into the form.
 function Host({ draft, family }: HostProps) {
+  const [inputs, setInputs] = useState<CompatInputDrafts>({});
   const form = useForm<ProviderFormValues, unknown, ProviderFormSubmission>({
     defaultValues: toFormValues(draft),
   });
+  const baseUrl = useWatch({ control: form.control, name: "baseUrl" });
+  const input = useMemo(
+    () => ({ provider: { ...BLANK_PROVIDER_DRAFT, baseUrl } }),
+    [baseUrl],
+  );
+  const resolution = useCompatResolution([family], input);
   return (
     <TooltipProvider>
-      <ProviderCompatPanel family={family} form={form} />
+      <ProviderCompatPanel
+        baseline={draft.compat}
+        family={family}
+        form={form}
+        inputs={inputs}
+        onInputsChange={setInputs}
+        resolution={resolution}
+      />
       <CompatProbe form={form} />
     </TooltipProvider>
   );
@@ -167,6 +185,7 @@ function resolutionOf(family: ProtocolFamily): ResolvedCompat {
 function sampleValue(descriptor: CompatFieldDescriptor): JsonValue {
   switch (descriptor.kind) {
     case "json":
+    case "list":
       return 1;
     case "map":
       return {};
@@ -181,7 +200,63 @@ function switchIn(row: HTMLElement): HTMLElement {
   return within(row).getByRole("switch");
 }
 
+/** The well the field's table scrolls inside, whose height is its row count. */
+function wellOf(row: HTMLElement): HTMLElement {
+  const well = row.querySelector(
+    '[data-slot="table-container"]',
+  )?.parentElement;
+  if (!(well instanceof HTMLElement)) {
+    throw new Error("the row holds no table");
+  }
+  return well;
+}
+
 describe("provider compat panel", () => {
+  it("shows asynchronous map defaults and inherits after clearing a JSON override", async () => {
+    resolveCompatMock.mockImplementation(({ provider }) =>
+      Promise.resolve({
+        sources: {
+          openRouterRouting: "familyDefault",
+          vllmPriority: "familyDefault",
+        },
+        values: {
+          openRouterRouting: { order: ["first"] },
+          vllmPriority:
+            provider.compat?.["openai-completions"]?.vllmPriority ?? 3,
+        },
+      }),
+    );
+    render(
+      <Host
+        draft={{
+          ...BASE,
+          compat: { "openai-completions": { vllmPriority: 7 } },
+        }}
+        family="openai-completions"
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        within(
+          fieldRow("openai-completions", "openRouterRouting"),
+        ).getByDisplayValue("order"),
+      ).toBeTruthy(),
+    );
+    const priority = fieldRow("openai-completions", "vllmPriority");
+    expect(within(priority).getByRole("textbox")).toHaveProperty("value", "7");
+    const input = within(priority).getByRole("textbox");
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.blur(input);
+    await waitFor(() =>
+      expect(
+        within(fieldRow("openai-completions", "vllmPriority")).getByRole(
+          "textbox",
+        ),
+      ).toHaveProperty("value", "3"),
+    );
+    expect(compatOf()).toBeNull();
+  });
+
   it("renders a control of its kind for every field of its family", async () => {
     for (const family of protocolFamilySchema.options) {
       const view = renderHost({ draft: BASE, family });
@@ -205,6 +280,7 @@ describe("provider compat panel", () => {
         const row = fieldRow(family, field);
         switch (descriptor.kind) {
           case "json":
+          case "list":
             expect(within(row).getByRole("textbox")).toBeTruthy();
             break;
           case "map":
@@ -232,6 +308,7 @@ describe("provider compat panel", () => {
     const section = await screen.findByRole("group", {
       name: familyLabel("anthropic-messages"),
     });
+    // Editable overrides are already in the draft; only the lower layers resolve.
     await waitFor(() => {
       expect(resolveCompatMock).toHaveBeenCalledTimes(1);
     });
@@ -247,7 +324,7 @@ describe("provider compat panel", () => {
     });
   });
 
-  it("writes an override and restores the default", async () => {
+  it("offers one saved-value undo after changing an inherited value", async () => {
     renderHost({ draft: BASE, family: "openai-completions" });
     await screen.findByRole("group", {
       name: familyLabel("openai-completions"),
@@ -264,20 +341,67 @@ describe("provider compat panel", () => {
       "openai-completions": { supportsStore: false },
     });
     expect(checkedIn(row)).toBe("false");
+    expect(
+      within(row).getAllByRole("button", { name: /^Restore/ }),
+    ).toHaveLength(1);
 
     fireEvent.click(
-      within(row).getByRole("button", { name: "Restore default" }),
+      within(row).getByRole("button", { name: "Restore the saved value" }),
     );
 
     expect(compatOf()).toBeNull();
     const restored = fieldRow("openai-completions", "supportsStore");
     expect(
-      within(restored).queryByRole("button", { name: "Restore default" }),
+      within(restored).queryByRole("button", {
+        name: "Restore the saved value",
+      }),
     ).toBeNull();
     // The row re-reads the merged value: the override is gone.
     await waitFor(() => {
       expect(checkedIn(restored)).toBe("true");
     });
+  });
+
+  it("keeps a saved override through a switch round trip even when it repeats the default", async () => {
+    // What a preset leaves behind: the document carries the value, and the
+    // vendor layer below it resolves to the same one.
+    renderHost({
+      draft: {
+        ...BASE,
+        compat: { "openai-completions": { supportsStore: true } },
+      },
+      family: "openai-completions",
+    });
+    const row = await screen.findByRole("group", {
+      name: fieldLabel("supportsStore"),
+    });
+
+    await waitFor(() => {
+      expect(checkedIn(row)).toBe("true");
+    });
+    expect(within(row).queryByRole("button", { name: /^Restore/ })).toBeNull();
+    fireEvent.click(switchIn(row));
+    expect(
+      within(row).getAllByRole("button", { name: /^Restore/ }),
+    ).toHaveLength(1);
+    fireEvent.click(switchIn(row));
+    expect(within(row).queryByRole("button", { name: /^Restore/ })).toBeNull();
+    expect(compatOf()).toEqual({
+      "openai-completions": { supportsStore: true },
+    });
+  });
+
+  it("names a map field once, above its own table", async () => {
+    renderHost({ draft: BASE, family: "openai-completions" });
+    const row = await screen.findByRole("group", {
+      name: fieldLabel("chatTemplateKwargs"),
+    });
+
+    // The key/value table names and describes itself, so the row around it
+    // must not name the field a second time.
+    expect(
+      within(row).getAllByText(fieldLabel("chatTemplateKwargs")),
+    ).toHaveLength(1);
   });
 
   it("writes a map entry with its cell parsed as JSON", async () => {
@@ -303,6 +427,30 @@ describe("provider compat panel", () => {
     expect(compatOf()).toEqual({
       "openai-completions": { chatTemplateKwargs: { temperature: 1 } },
     });
+  });
+
+  it("grows a map's table from its first row to the height it was designed for", async () => {
+    renderHost({ draft: BASE, family: "openai-completions" });
+    const row = await screen.findByRole("group", {
+      name: fieldLabel("chatTemplateKwargs"),
+    });
+    const add = within(row).getByRole("button", {
+      name: `${fieldLabel("chatTemplateKwargs")} ${i18next.t("settings.providers.compatAddMapEntry")}`,
+    });
+
+    // An empty map is the heading alone: a well holding no rows says nothing.
+    expect(within(row).queryByRole("table")).toBeNull();
+
+    const heights: string[] = [];
+    for (let count = 1; count <= 6; count += 1) {
+      fireEvent.click(add);
+      heights.push(wellOf(row).style.height);
+    }
+    // Every row up to the fifth makes the well taller, the way a table the
+    // size of its own rows does; the sixth leaves it where it is and scrolls
+    // inside it instead.
+    expect(new Set(heights.slice(0, 5)).size).toBe(5);
+    expect(heights[5]).toBe(heights[4]);
   });
 
   it("keeps an invalid JSON text out of the draft and reports it", async () => {

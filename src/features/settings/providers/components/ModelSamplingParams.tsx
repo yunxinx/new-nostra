@@ -10,7 +10,14 @@ import {
 import { samplingParamsRecord, samplingRows } from "../model-rows";
 
 interface ModelSamplingParamsProps {
+  /** What this parameter map is for, shown over the table. */
+  info?: string | undefined;
+  /** Whether the map holds a validation error. */
+  isInvalid?: boolean | undefined;
+  label: string;
   onChange: (params: Record<string, JsonValue> | undefined) => void;
+  /** Puts the whole map back to the stored value. */
+  onRevert?: (() => void) | undefined;
   value: Record<string, JsonValue> | undefined;
 }
 
@@ -20,7 +27,11 @@ interface ModelSamplingParamsProps {
 // blank-key rows dropped. A value is JSON when it parses and plain text
 // otherwise, so no text is ever invalid.
 export function ModelSamplingParams({
+  info,
+  isInvalid,
+  label,
   onChange,
+  onRevert,
   value,
 }: ModelSamplingParamsProps) {
   const { t } = useTranslation();
@@ -29,11 +40,15 @@ export function ModelSamplingParams({
   return (
     <KeyValueEditor
       addLabel={t("settings.providers.addSamplingParam")}
+      info={info}
+      isInvalid={isInvalid}
       keyLabel={t("settings.providers.samplingKey")}
+      label={label}
       onChange={(next) => {
         setRows(next);
         onChange(samplingParamsRecord(next));
       }}
+      onRevert={onRevert}
       removeLabel={t("settings.providers.removeSamplingParam")}
       rows={rows}
       valueLabel={t("settings.providers.samplingValue")}

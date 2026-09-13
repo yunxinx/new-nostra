@@ -10,6 +10,7 @@ import { modelDisplayName } from "@/lib/model-catalog";
 
 import { compatFamiliesFor } from "../../components/compat/compat-fields";
 import { formatJsonValue } from "../../components/compat/compat-values";
+import { CompatResolutionNotice } from "../../components/compat/CompatResolutionNotice";
 import { CompatSourceBadge } from "../../components/compat/CompatSourceBadge";
 import { useCompatResolution } from "../../components/compat/use-compat-resolution";
 import { providerToDraft } from "../../providers/draft";
@@ -58,7 +59,8 @@ export function ModelCardPanel({
       subtitle={provider.name}
       title={modelDisplayName(model)}
     >
-      <div className="flex flex-col gap-4">
+      <div aria-busy={resolved.isLoading} className="flex flex-col gap-4">
+        <CompatResolutionNotice resolution={resolved} />
         <CardSection title={t("settings.providers.modelSections.identity")}>
           <Fact label={t("settings.providers.modelId")} value={model.id} />
           <Fact
@@ -123,7 +125,7 @@ export function ModelCardPanel({
         </CardSection>
 
         {families.map((family) => {
-          const values = resolved[family]?.values ?? {};
+          const values = resolved.data[family]?.values ?? {};
           if (Object.keys(values).length === 0) {
             return null;
           }
@@ -134,7 +136,7 @@ export function ModelCardPanel({
             >
               <div className="flex flex-col gap-1">
                 {Object.entries(values).map(([field, value]) => {
-                  const source = (resolved[family]?.sources ?? {})[field];
+                  const source = (resolved.data[family]?.sources ?? {})[field];
                   return (
                     <div className="flex items-center gap-2" key={field}>
                       <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">

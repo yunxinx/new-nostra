@@ -47,7 +47,7 @@ describe("compat field introspection", () => {
     expect(completions.get("vllmPriority")?.kind).toBe("json");
 
     const anthropic = fieldsOf("anthropic-messages");
-    expect(anthropic.get("allowedFallbackModels")?.kind).toBe("json");
+    expect(anthropic.get("allowedFallbackModels")?.kind).toBe("list");
   });
 
   it("lists a select's options in schema order", () => {

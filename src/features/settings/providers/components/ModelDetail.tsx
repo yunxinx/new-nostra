@@ -15,17 +15,26 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useScrollChaining } from "@/hooks/use-scroll-chaining";
 import { changedValueCount, restoreField } from "@/lib/draft-values";
+import { PROTOCOL_FAMILIES } from "@/lib/protocols";
 
 import type { ProtocolFamily } from "../../components/compat/compat-fields";
 import type { ModelRowErrors } from "../draft";
+import type { ModelEditorState } from "../model-draft";
 
+import {
+  hasCustomCompat,
+  hasInvalidCompatInputs,
+  restoreCompatDefaults,
+} from "../../components/compat/compat-draft";
 import { compatFamiliesFor } from "../../components/compat/compat-fields";
 import {
   overrideRecord,
   storedBuckets,
   withCompatOverride,
 } from "../../components/compat/compat-values";
+import { CompatResolutionNotice } from "../../components/compat/CompatResolutionNotice";
 import { CompatSection } from "../../components/compat/CompatSection";
 import { useCompatResolution } from "../../components/compat/use-compat-resolution";
 import { SettingsRow } from "../../components/SettingsRow";
@@ -59,10 +68,12 @@ interface ModelDetailProps {
    * out, so the pane's own header would only repeat them.
    */
   chrome?: "pane" | "panel";
+  editor: ModelEditorState;
   errors: ModelRowErrors | undefined;
   model: ModelEntry;
   onBack: () => void;
   onChange: (model: ModelEntry) => void;
+  onEditorChange: (editor: ModelEditorState) => void;
   /** The provider draft this model's compat merge resolves against. */
   provider: ProviderDraft;
 }
@@ -75,13 +86,21 @@ interface ModelDetailProps {
 export function ModelDetail({
   baseline = BLANK_MODEL_ENTRY,
   chrome = "pane",
+  editor,
   errors,
   model,
   onBack,
   onChange,
+  onEditorChange,
   provider,
 }: ModelDetailProps) {
   const { t } = useTranslation();
+  // One per scrolling pane: the panes mount as their tab is opened, so each
+  // gets the ref that wires its wheel hand-off when it appears.
+  const identityRef = useScrollChaining();
+  const capabilityRef = useScrollChaining();
+  const pricingRef = useScrollChaining();
+  const familyRef = useScrollChaining();
   const [restored, setRestored] = useState<
     Partial<Record<keyof ModelEntry, number>>
   >({});
@@ -112,8 +131,17 @@ export function ModelDetail({
     () => compatFamiliesFor(provider.api, [model]),
     [model, provider.api],
   );
-  const input = useMemo(() => ({ model, provider }), [model, provider]);
-  const resolved = useCompatResolution(families, input);
+  // The same drafts with the model's own overrides off: what a field falls
+  // back to once its key is dropped, which is what tells a real override apart
+  // from one that only repeats the layer below.
+  const below = useMemo(
+    () => ({ model: withModelValue(model, "compat", undefined), provider }),
+    [model, provider],
+  );
+  const fallbacks = useCompatResolution(PROTOCOL_FAMILIES, below);
+  const canRestoreInherited =
+    hasInvalidCompatInputs(editor.compatInputs) ||
+    hasCustomCompat(model.compat, fallbacks.data);
   // The family whose compat is being edited. The compat strip sits under the
   // section strip rather than beside the fields, so the protocol is picked
   // where the section was picked and the fields keep the pane's full width.
@@ -139,7 +167,11 @@ export function ModelDetail({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      aria-busy={fallbacks.isLoading}
+      className="flex min-h-0 flex-1 flex-col pb-6"
+    >
+      <CompatResolutionNotice resolution={fallbacks} />
       <Tabs
         className="min-h-0 flex-1 gap-0"
         onValueChange={setSection}
@@ -179,7 +211,8 @@ export function ModelDetail({
           </TabsList>
         </div>
         <TabsContent
-          className="min-h-0 flex-1 overflow-x-clip overflow-y-auto pt-2"
+          className="min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto overscroll-contain pt-2"
+          ref={identityRef}
           value="identity"
         >
           <SettingsRow
@@ -239,30 +272,27 @@ export function ModelDetail({
               value={model.baseUrl ?? ""}
             />
           </SettingsRow>
-          <SettingsRow
+          <HeadersEditor
             info={t("settings.providers.modelHeadersDesc")}
             isInvalid={hasFieldError(errors?.headers)}
+            key={restored.headers ?? 0}
             label={t("settings.providers.modelHeaders")}
-            layout="stacked"
+            onChange={(headers) =>
+              onChange(
+                withModelValue(
+                  model,
+                  "headers",
+                  Object.keys(headers).length > 0 ? headers : undefined,
+                ),
+              )
+            }
             onRevert={revertFor("headers")}
-          >
-            <HeadersEditor
-              key={restored.headers ?? 0}
-              onChange={(headers) =>
-                onChange(
-                  withModelValue(
-                    model,
-                    "headers",
-                    Object.keys(headers).length > 0 ? headers : undefined,
-                  ),
-                )
-              }
-              value={model.headers}
-            />
-          </SettingsRow>
+            value={model.headers}
+          />
         </TabsContent>
         <TabsContent
-          className="min-h-0 flex-1 overflow-x-clip overflow-y-auto pt-2"
+          className="min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto overscroll-contain pt-2"
+          ref={capabilityRef}
           value="capability"
         >
           <SettingsRow
@@ -336,7 +366,7 @@ export function ModelDetail({
             info={t("settings.providers.modelThinkingLevelsDesc")}
             isInvalid={hasFieldError(errors?.thinkingLevelMap)}
             label={t("settings.providers.modelThinkingLevels")}
-            onRevert={revertFor("thinkingLevelMap")}
+            layout="stacked"
           >
             <ModelThinkingLevels
               baseline={baseline}
@@ -344,32 +374,28 @@ export function ModelDetail({
               onChange={onChange}
             />
           </SettingsRow>
-          <SettingsRow
+          <ModelSamplingParams
             info={t("settings.providers.modelSamplingParamsDesc")}
             isInvalid={hasFieldError(errors?.samplingParams)}
+            key={restored.samplingParams ?? 0}
             label={t("settings.providers.modelSamplingParams")}
-            layout="stacked"
+            onChange={(samplingParams) =>
+              onChange(withModelValue(model, "samplingParams", samplingParams))
+            }
             onRevert={revertFor("samplingParams")}
-          >
-            <ModelSamplingParams
-              key={restored.samplingParams ?? 0}
-              onChange={(samplingParams) =>
-                onChange(
-                  withModelValue(model, "samplingParams", samplingParams),
-                )
-              }
-              value={model.samplingParams}
-            />
-          </SettingsRow>
+            value={model.samplingParams}
+          />
         </TabsContent>
         <TabsContent
-          className="min-h-0 flex-1 overflow-x-clip overflow-y-auto pt-4"
+          className="min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto overscroll-contain pt-4"
+          ref={pricingRef}
           value="pricing"
         >
           <ModelCostEditor
             baseline={baseline.cost}
             onChange={(cost) => onChange(withModelValue(model, "cost", cost))}
-            value={model.cost}
+            onRowsChange={(costRows) => onEditorChange({ ...editor, costRows })}
+            rows={editor.costRows}
           />
           {/* The price editor is a block, not a settings row, so the rejection
               its fields carry needs a line of its own. */}
@@ -401,24 +427,58 @@ export function ModelDetail({
                 ))}
               </TabsList>
               <TabsContent
-                className="min-h-0 flex-1 overflow-x-clip overflow-y-auto pt-2"
+                className="min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto overscroll-contain pt-2"
+                ref={familyRef}
                 value={activeFamily}
               >
                 <CompatSection
                   baseline={overrideRecord(baseline.compat?.[activeFamily])}
                   bucket={overrideRecord(model.compat?.[activeFamily])}
+                  fallbacks={fallbacks.data[activeFamily]?.values ?? {}}
                   family={activeFamily}
+                  inputs={editor.compatInputs}
+                  key={restored.compat ?? 0}
                   layerSource="model"
                   onFieldChange={(field, value) =>
                     handleCompatChange(activeFamily, field, value)
                   }
+                  onInputsChange={(compatInputs) =>
+                    onEditorChange({ ...editor, compatInputs })
+                  }
                   showHeading={false}
-                  sources={resolved[activeFamily]?.sources ?? {}}
-                  values={resolved[activeFamily]?.values ?? {}}
+                  sources={fallbacks.data[activeFamily]?.sources ?? {}}
                 />
               </TabsContent>
             </Tabs>
           )}
+          <div className="flex shrink-0 justify-end pt-3">
+            <Button
+              disabled={
+                fallbacks.isLoading ||
+                fallbacks.error !== null ||
+                !canRestoreInherited
+              }
+              onClick={() => {
+                onChange(
+                  withModelValue(
+                    model,
+                    "compat",
+                    restoreCompatDefaults(baseline.compat, fallbacks.data),
+                  ),
+                );
+                onEditorChange({ ...editor, compatInputs: {} });
+                setRestored((current) => ({
+                  ...current,
+                  compat: (current.compat ?? 0) + 1,
+                }));
+              }}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {t("settings.providers.restoreInheritedCompat")}
+            </Button>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

@@ -126,12 +126,14 @@ function bodyRows(): Array<Array<null | string>> {
     );
 }
 
-/** The ordered member labels of the editor's left pane. */
+/**
+ * The ordered member rows of the editor's left pane. The table marks them for
+ * the drag that reorders them, which is also how a test reads them in order.
+ */
 function orderedMembers(): Array<null | string> {
-  return screen
-    .getAllByRole("listitem")
-    .filter((item) => item.parentElement?.tagName === "OL")
-    .map((item) => item.textContent);
+  return Array.from(document.querySelectorAll("[data-member-row]")).map(
+    (row) => row.textContent,
+  );
 }
 
 /**
@@ -161,7 +163,8 @@ describe("unified model list", () => {
     const row = bodyRows()[0] ?? [];
     expect(screen.getByRole("checkbox", { name: "fast" })).toBeTruthy();
     expect(row[1]).toContain("fast");
-    expect(row[2]).toBe("1Gateway / gpt-4o-mini2Anthropic / claude-sonnet");
+    // Order number, model, and the provider it belongs to as a badge.
+    expect(row[2]).toBe("1gpt-4o-miniGateway2claude-sonnetAnthropic");
   });
 
   it("says the aggregate has no members rather than leaving the cell blank", async () => {
@@ -221,10 +224,10 @@ describe("unified model editor", () => {
       target: { value: "fast" },
     });
     fireEvent.click(
-      screen.getByRole("checkbox", { name: "Gateway / gpt-4o-mini" }),
+      screen.getByRole("checkbox", { name: "Gateway · gpt-4o-mini" }),
     );
     fireEvent.click(
-      screen.getByRole("checkbox", { name: "Anthropic / claude-sonnet" }),
+      screen.getByRole("checkbox", { name: "Anthropic · claude-sonnet" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -249,28 +252,28 @@ describe("unified model editor", () => {
     await renderPage([], "No unified models yet");
     fireEvent.click(screen.getByRole("button", { name: "New unified model" }));
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "Gateway / gpt-4o" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Gateway · gpt-4o" }));
     fireEvent.click(
-      screen.getByRole("checkbox", { name: "Anthropic / claude-sonnet" }),
+      screen.getByRole("checkbox", { name: "Anthropic · claude-sonnet" }),
     );
-    expect(orderedMembers()[0]).toContain("Gateway / gpt-4o");
+    expect(orderedMembers()[0]).toContain("gpt-4oGateway");
 
     fireEvent.click(
       screen.getAllByRole("button", { name: "Move member up" })[1] ??
         document.body,
     );
 
-    expect(orderedMembers()[0]).toContain("Anthropic / claude-sonnet");
-    expect(orderedMembers()[1]).toContain("Gateway / gpt-4o");
+    expect(orderedMembers()[0]).toContain("claude-sonnetAnthropic");
+    expect(orderedMembers()[1]).toContain("gpt-4oGateway");
   });
 
   it("unchecking a candidate removes it from the order", async () => {
     await renderPage([], "No unified models yet");
     fireEvent.click(screen.getByRole("button", { name: "New unified model" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Gateway / gpt-4o" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Gateway · gpt-4o" }));
     expect(orderedMembers()).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "Gateway / gpt-4o" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Gateway · gpt-4o" }));
 
     expect(screen.getByText("No members yet")).toBeTruthy();
   });
@@ -278,14 +281,17 @@ describe("unified model editor", () => {
   it("narrows the candidate pane without touching the order", async () => {
     await renderPage([], "No unified models yet");
     fireEvent.click(screen.getByRole("button", { name: "New unified model" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Gateway / gpt-4o" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Gateway · gpt-4o" }));
 
     fireEvent.change(
       screen.getByRole("searchbox", { name: "Search candidates" }),
       { target: { value: "claude" } },
     );
 
-    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+    // One candidate left, plus the header's add-all box.
+    expect(screen.getAllByRole("checkbox", { name: /Anthropic/ })).toHaveLength(
+      1,
+    );
     expect(orderedMembers()).toHaveLength(1);
   });
 
@@ -371,8 +377,15 @@ it("finds a candidate by id when it also has a display name", async () => {
     { target: { value: "request-id" } },
   );
   expect(
-    screen.getByRole("checkbox", { name: "Gateway / Friendly" }),
+    screen.getByRole("checkbox", { name: "Gateway · request-id" }),
   ).toBeTruthy();
+  // The two columns part: the name a reader chose, then the name the request
+  // goes out under.
+  const cells = Array.from(
+    screen.getAllByRole("row").at(-1)?.querySelectorAll("td") ?? [],
+  );
+  expect(cells[1]?.textContent).toBe("Friendly");
+  expect(cells[2]?.textContent).toBe("request-id");
 });
 
 it("keeps a changed draft until leaving is confirmed", async () => {
@@ -382,10 +395,11 @@ it("keeps a changed draft until leaving is confirmed", async () => {
     target: { value: "unsaved" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Unified models" }));
-  expect(screen.getByRole("textbox", { name: "Name" })).toHaveProperty(
-    "value",
-    "unsaved",
-  );
+  // The guard is a modal dialog, so Radix marks the page behind it
+  // `aria-hidden` and the field has to be read through that.
+  expect(
+    screen.getByRole("textbox", { hidden: true, name: "Name" }),
+  ).toHaveProperty("value", "unsaved");
   fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
   expect(
     screen.getByRole("button", { name: "New unified model" }),

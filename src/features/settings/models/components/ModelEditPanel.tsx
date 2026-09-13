@@ -7,12 +7,16 @@ import { FloatingPanel } from "@/components/common/FloatingPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useUpdateProvider } from "@/hooks/use-providers";
-import { changedValueCount } from "@/lib/draft-values";
 
+import { hasInvalidCompatInputs } from "../../components/compat/compat-draft";
 import { DirtyNotice } from "../../components/DirtyNotice";
 import { useDraftGuard } from "../../hooks/use-draft-guard";
 import { ModelDetail } from "../../providers/components/ModelDetail";
 import { providerToDraft } from "../../providers/draft";
+import {
+  changedModelCount,
+  modelEditorState,
+} from "../../providers/model-draft";
 import { modelEntrySchema } from "../../schemas/provider";
 
 interface ModelEditPanelProps {
@@ -44,7 +48,9 @@ export function ModelEditPanel({
   const { t } = useTranslation();
   const update = useUpdateProvider();
   const [model, setModel] = useState(target.model);
-  const changedCount = changedValueCount(target.model, model);
+  const [editor, setEditor] = useState(() => modelEditorState(target.model));
+  const hasInvalidInputs = hasInvalidCompatInputs(editor.compatInputs);
+  const changedCount = changedModelCount(target.model, model, editor);
   const isChanged = changedCount > 0;
   const [isRefused, setIsRefused] = useState(false);
   const guard = useDraftGuard({
@@ -59,7 +65,7 @@ export function ModelEditPanel({
   const providerDraft = providerToDraft(target.provider);
 
   function handleSave(): void {
-    if (update.isPending) return;
+    if (update.isPending || hasInvalidInputs) return;
     const parsed = modelEntrySchema.safeParse(model);
     setIsRefused(!parsed.success);
     if (!parsed.success) return;
@@ -110,7 +116,7 @@ export function ModelEditPanel({
             {t("common.cancel")}
           </Button>
           <Button
-            disabled={!isChanged || update.isPending}
+            disabled={!isChanged || update.isPending || hasInvalidInputs}
             onClick={handleSave}
             size="sm"
             type="button"
@@ -127,17 +133,21 @@ export function ModelEditPanel({
           : model.name
       }
     >
-      {guard.isBlocked && (
-        <DirtyNotice onCancel={guard.cancel} onConfirm={guard.confirm} />
-      )}
+      <DirtyNotice
+        onCancel={guard.cancel}
+        onConfirm={guard.confirm}
+        open={guard.isBlocked}
+      />
       <fieldset className="min-w-0" disabled={update.isPending}>
         <ModelDetail
           baseline={target.model}
           chrome="panel"
+          editor={editor}
           errors={undefined}
           model={model}
           onBack={guard.requestLeave}
           onChange={setModel}
+          onEditorChange={setEditor}
           provider={providerDraft}
         />
       </fieldset>

@@ -152,10 +152,9 @@ export function SettingsWindowApp() {
           {/* Reserved title row: the sidebar background extends behind the
             traffic lights through this spacer. */}
           <div className="h-[34px] shrink-0" data-tauri-drag-region />
-          {/* The 8px pad plus a 32px row centres the first label 14px down,
-            which is where a settings row's label sits under the same pad and
-            row height — the two columns share one grid, with no correction. */}
-          <div className="flex flex-col gap-1 p-2">
+          {/* No top pad: the first row's 32px box starts at the title strip's
+            edge, and every page's first line starts at that same height. */}
+          <div className="flex flex-col gap-1 px-2 pb-2">
             {NAV_ITEMS.map((item) =>
               "heading" in item ? (
                 <p
@@ -217,7 +216,7 @@ export function SettingsWindowApp() {
             )}
           </>
         ) : (
-          <div className="min-h-0 flex-1 overflow-x-clip overflow-y-auto">
+          <div className="min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto">
             {/* Shared vertical scroll for the form pages; rows carry their own
                 rhythm with no card chrome. The About page centers itself
                 instead of joining the padded form column. */}

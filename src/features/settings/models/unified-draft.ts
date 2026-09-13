@@ -41,6 +41,25 @@ export function moveMember(
   return next;
 }
 
+/**
+ * Moves one member to another position, shifting the ones in between. A move
+ * onto itself or off either end leaves the list alone.
+ */
+export function moveMemberTo(
+  members: UnifiedMember[],
+  from: number,
+  to: number,
+): UnifiedMember[] {
+  const row = members[from];
+  if (row === undefined || from === to) {
+    return members;
+  }
+  const next = [...members];
+  next.splice(from, 1);
+  next.splice(to, 0, row);
+  return next;
+}
+
 /** Removes one member by position. */
 export function removeMember(
   members: UnifiedMember[],

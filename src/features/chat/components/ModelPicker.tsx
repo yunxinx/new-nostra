@@ -101,7 +101,7 @@ export function ModelPicker({ model, onPick }: ModelPickerProps) {
   const isLoading = providers.isLoading || unified.isLoading;
   const error = providers.error ?? unified.error;
 
-  function pick(next: ModelSelection | null): void {
+  function pick(next: ModelSelection): void {
     onPick(next);
     setIsOpen(false);
   }
@@ -123,9 +123,12 @@ export function ModelPicker({ model, onPick }: ModelPickerProps) {
           <ChevronDown className="size-3.5 shrink-0 opacity-60" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-80 gap-0 p-0">
-        <div className="flex flex-col gap-2 border-b p-2">
-          <div className="relative">
+      <PopoverContent align="start" className="w-96 gap-0 p-0">
+        {/* One line: the field takes the width the filters leave it, and the
+            filters keep a fixed width — they count their selections instead
+            of spelling them out, so a filter never grows into the field. */}
+        <div className="flex min-w-0 items-center gap-1.5 border-b p-2">
+          <div className="relative min-w-0 flex-1">
             <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2" />
             <Input
               aria-label={t("chat.modelSearch")}
@@ -136,16 +139,18 @@ export function ModelPicker({ model, onPick }: ModelPickerProps) {
               value={search}
             />
           </div>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex shrink-0 items-center gap-1.5">
             <FacetedFilter
               onChange={setProviderIds}
               options={providerOptions}
-              title={t("settings.models.filterProvider")}
+              selectionDisplay="count"
+              title={t("common.filterProvider")}
               values={providerIds}
             />
             <FacetedFilter
               onChange={setProtocols}
               options={protocolOptions}
+              selectionDisplay="count"
               title={t("common.filterProtocol")}
               values={protocols}
             />
@@ -227,19 +232,6 @@ export function ModelPicker({ model, onPick }: ModelPickerProps) {
               </p>
             )}
         </div>
-        {model !== null && (
-          <div className="border-t p-1">
-            <Button
-              className="w-full justify-start"
-              onClick={() => pick(null)}
-              size="xs"
-              type="button"
-              variant="ghost"
-            >
-              {t("chat.modelPickerClear")}
-            </Button>
-          </div>
-        )}
       </PopoverContent>
     </Popover>
   );
@@ -259,9 +251,11 @@ function PickerRow({
   onPick: () => void;
 }) {
   return (
+    // bg-accent on hover, never bg-muted: inside a popover the muted token is
+    // the panel's own colour, so a muted hover shows nothing in dark mode.
     <button
       aria-current={isPicked}
-      className="hover:bg-muted/60 flex w-full min-w-0 items-center gap-2 rounded-[4px] px-1.5 py-1 text-left outline-none focus-visible:ring-3 disabled:opacity-50"
+      className="hover:bg-accent flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-[4px] px-1.5 py-1 text-left outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50"
       disabled={isDisabled}
       onClick={onPick}
       type="button"

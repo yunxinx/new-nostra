@@ -182,6 +182,29 @@
   }
 }
 
+/* A pane that scrolls without drawing a bar: the scroll is still there, it
+   just claims no strip. Used on the panes that read as one column of the
+   window — a bar down their edge says nothing the eye needs, and a table
+   inside them keeps a bar of its own for the part that really does scroll. */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* The chat pane's scrollbar, through the standard properties rather than the
+   ::-webkit-scrollbar styling the rest of the app uses: WebKit reserves no
+   scrollbar-gutter for a custom-styled scrollbar (it reserves the native
+   width instead), so the pane's content jumped the moment it became
+   scrollable. The standard scrollbar is an overlay on WebKit — it never
+   takes space, so there is nothing to reserve — and a thin classic bar
+   elsewhere, where `scrollbar-gutter: stable` reserves for it exactly. */
+@utility scrollbar-thin-stable {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
 /* Theme-switch cross-fade. use-theme.ts adds .theme-transition to <html>
    just before a dark-class flip and removes it once the colors settle. The
    transition animates the theme's custom properties on the root itself:
@@ -412,8 +435,10 @@ html.theme-transition *::after {
    second guard. The ramp only becomes visible together with the action
    cluster (group-hover/row and group-focus-within/row in SessionRow), so
    its base gradient targets the hover state; the selected override keeps
-   it in sync. Ramp shape: a 40px gradient slope, then solid color to the
-   row's right edge so the whole action cluster sits on full background. */
+   it in sync. Ramp shape: a 24px gradient slope, then solid color to the
+   row's right edge. The ramp is 80px wide against the action cluster's 52px
+   (two 24px buttons inset 4px), so the slope ends 4px before the star and
+   the whole cluster still sits on solid background. */
 .session-row-selected {
   background: var(--sidebar-selected);
   color: var(--sidebar-accent-foreground);
@@ -422,7 +447,7 @@ html.theme-transition *::after {
   background: linear-gradient(
     to right,
     transparent,
-    var(--sidebar-accent) 40px,
+    var(--sidebar-accent) 24px,
     var(--sidebar-accent) 100%
   );
 }
@@ -430,7 +455,7 @@ html.theme-transition *::after {
   background: linear-gradient(
     to right,
     transparent,
-    var(--sidebar-selected) 40px,
+    var(--sidebar-selected) 24px,
     var(--sidebar-selected) 100%
   );
 }

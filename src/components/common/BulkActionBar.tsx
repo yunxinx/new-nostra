@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 
 interface BulkActionBarProps {
   children?: ReactNode;
@@ -60,7 +60,7 @@ export function BulkActionBar({
       className="bg-popover text-popover-foreground ring-border absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-lg px-2 py-1.5 shadow-md ring-1"
       role="toolbar"
     >
-      <Button
+      <IconButton
         aria-label={t("common.clearSelection")}
         className="rounded-full"
         onClick={onClear}
@@ -69,7 +69,7 @@ export function BulkActionBar({
         variant="ghost"
       >
         <X className="size-3" />
-      </Button>
+      </IconButton>
       <span aria-hidden="true" className="bg-border h-5 w-px shrink-0" />
       <span className="text-muted-foreground px-1 text-sm whitespace-nowrap">
         {t("common.selectedCount", { count })}

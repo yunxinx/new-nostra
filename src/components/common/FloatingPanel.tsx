@@ -5,7 +5,8 @@ import { X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { useTranslation } from "react-i18next";
 
-import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { useScrollChaining } from "@/hooks/use-scroll-chaining";
 
 interface FloatingPanelProps {
   children: ReactNode;
@@ -38,6 +39,7 @@ export function FloatingPanel({
   title,
 }: FloatingPanelProps) {
   const { t } = useTranslation();
+  const bodyRef = useScrollChaining();
   return (
     <DialogPrimitive.Root
       onOpenChange={(next) => {
@@ -67,7 +69,7 @@ export function FloatingPanel({
                 </DialogPrimitive.Description>
               )}
             </div>
-            <Button
+            <IconButton
               aria-label={t("common.close")}
               onClick={onClose}
               size="icon-xs"
@@ -75,9 +77,14 @@ export function FloatingPanel({
               variant="ghost"
             >
               <X className="size-3.5" />
-            </Button>
+            </IconButton>
           </div>
-          <div className="min-h-0 flex-1 overflow-x-clip overflow-y-auto px-4 py-3">
+          {/* The pane holds the wheel until the wheel keeps pressing against
+              its end — see `useScrollChaining`. */}
+          <div
+            className="min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto overscroll-contain px-4 py-3"
+            ref={bodyRef}
+          >
             {children}
           </div>
           {footer !== undefined && (

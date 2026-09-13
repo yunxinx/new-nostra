@@ -1,13 +1,20 @@
 import type { Mock } from "vitest";
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { ModelEntry } from "@/types/ipc";
 
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { initI18n } from "@/lib/i18n";
 
-import { modelDraftRows } from "../model-draft";
+import { type ModelDraftRow, modelDraftRows } from "../model-draft";
 import { ModelDirectory } from "./ModelDirectory";
 
 beforeAll(initI18n);
@@ -25,6 +32,7 @@ const MODELS: ModelEntry[] = [
 ];
 
 interface Harness {
+  modelRows: ModelDraftRow[];
   onModelsChange: Mock<(models: ModelEntry[]) => void>;
   onOpenModel: Mock<(index: number) => void>;
 }
@@ -39,45 +47,51 @@ function bodyRows(): Array<Array<null | string>> {
     );
 }
 
-async function pickRowAction(row: number, name: string): Promise<void> {
-  const triggers = screen.getAllByRole("button", { name: "Model actions" });
-  fireEvent.pointerDown(triggers[row] ?? document.body, {
-    button: 0,
-    ctrlKey: false,
-  });
-  fireEvent.pointerUp(await screen.findByRole("menuitem", { name }));
+/** The remove button of one row, which acts at once with no menu in between. */
+function removeRow(row: number): void {
+  const buttons = screen.getAllByRole("button", { name: /^Remove model / });
+  fireEvent.click(buttons[row] ?? document.body);
 }
 
 function renderDirectory(models: ModelEntry[] = MODELS): Harness {
   const harness: Harness = {
+    modelRows: modelDraftRows(models),
     onModelsChange: vi.fn<(models: ModelEntry[]) => void>(),
     onOpenModel: vi.fn<(index: number) => void>(),
   };
   render(
-    <ModelDirectory
-      api="openai-completions"
-      errors={undefined}
-      modelRows={modelDraftRows(models)}
-      onModelsChange={(rows) =>
-        harness.onModelsChange(rows.map((row) => row.model))
-      }
-      onOpenModel={harness.onOpenModel}
-    />,
+    <TooltipProvider>
+      <ModelDirectory
+        api="openai-completions"
+        errors={undefined}
+        modelRows={harness.modelRows}
+        onModelsChange={(rows) => {
+          harness.modelRows = rows;
+          harness.onModelsChange(rows.map((row) => row.model));
+        }}
+        onOpenModel={(key) =>
+          harness.onOpenModel(
+            harness.modelRows.findIndex((row) => row.key === key),
+          )
+        }
+      />
+    </TooltipProvider>,
   );
   return harness;
 }
 
 describe("model directory layout", () => {
-  it("carries the request name under the name the user sees", () => {
+  it("gives the request name and the display name a column each", () => {
     renderDirectory();
-    // The one naming column: the display name a row is read by, and under it
-    // the request name the upstream is called, which no column of its own
-    // would make any more visible.
+    // Two naming columns: the request name the upstream is called, then the
+    // name the user chose to see. Stacked in one cell the pair reads as one
+    // name with a subtitle, not as two things to compare.
     expect(bodyRows().map((cells) => cells[1])).toEqual([
-      "GPT-4ogpt-4o",
-      "—claude-sonnet",
-      "—llama-3",
+      "gpt-4o",
+      "claude-sonnet",
+      "llama-3",
     ]);
+    expect(bodyRows().map((cells) => cells[2])).toEqual(["GPT-4o", "—", "—"]);
   });
 
   it("gives each protocol a column so no row repeats a protocol name", () => {
@@ -87,15 +101,32 @@ describe("model directory layout", () => {
       .map((cell) => cell.textContent);
     expect(headers).toEqual([
       "Select all",
+      "Model ID",
       "Display name",
-      "Messages",
-      "Completions",
-      "Responses",
-      "Actions",
+      "Msg",
+      "Chat",
+      "Res",
+      "Edit",
+      "Delete",
     ]);
     // The ticking column, one checkbox per protocol per row, and the row
     // itself carries no label.
     expect(screen.getAllByRole("checkbox")).toHaveLength(13);
+  });
+
+  it("keeps the remove button in a column of its own, away from edit", () => {
+    renderDirectory();
+    const headers = screen.getAllByRole("columnheader");
+    const cells = Array.from(
+      screen.getAllByRole("row")[1]?.querySelectorAll("td") ?? [],
+    );
+    // Edit and delete sit in different cells: a destructive click is never
+    // one accidental nudge from the click that opens the row.
+    expect(cells[6]?.textContent).toBe("");
+    expect(cells[7]?.querySelector("button")?.getAttribute("aria-label")).toBe(
+      "Remove model gpt-4o",
+    );
+    expect(headers).toHaveLength(8);
   });
 
   it("names a row with no model id yet instead of rendering a blank", () => {
@@ -169,7 +200,11 @@ describe("model directory selection", () => {
 
     fireEvent.click(screen.getByRole("checkbox", { name: "gpt-4o" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "llama-3" }));
-    fireEvent.click(screen.getByRole("button", { name: "Remove model" }));
+    fireEvent.click(
+      within(screen.getByRole("toolbar")).getByRole("button", {
+        name: "Remove model",
+      }),
+    );
 
     const next = harness.onModelsChange.mock.calls[0]?.[0];
     expect(next?.map((model) => model.id)).toEqual(["claude-sonnet"]);
@@ -180,10 +215,13 @@ describe("model directory selection", () => {
 
     fireEvent.click(screen.getByRole("checkbox", { name: "gpt-4o" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "claude-sonnet" }));
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Protocol" }), {
-      button: 0,
-      ctrlKey: false,
-    });
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Set protocol" }),
+      {
+        button: 0,
+        ctrlKey: false,
+      },
+    );
     fireEvent.pointerUp(
       screen.getByRole("menuitemcheckbox", { name: "Responses" }),
     );
@@ -202,7 +240,11 @@ describe("model directory selection", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: "Search models" }), {
       target: { value: "llama" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Remove model" }));
+    fireEvent.click(
+      within(screen.getByRole("toolbar")).getByRole("button", {
+        name: "Remove model",
+      }),
+    );
 
     // Only llama-3 was ticked, so the write keeps the two rows above it.
     const next = harness.onModelsChange.mock.calls[0]?.[0];
@@ -240,10 +282,10 @@ describe("model directory actions", () => {
     expect(harness.onOpenModel).toHaveBeenCalledWith(3);
   });
 
-  it("removes a row by its stored position", async () => {
+  it("removes a row by its stored position", () => {
     const harness = renderDirectory();
 
-    await pickRowAction(0, "Remove model");
+    removeRow(0);
 
     const next = harness.onModelsChange.mock.calls[0]?.[0];
     expect(next?.map((model) => model.id)).toEqual([
@@ -254,6 +296,27 @@ describe("model directory actions", () => {
 });
 
 describe("model directory inline edits", () => {
+  it.each([
+    { isComposing: true, keyCode: 13 },
+    { isComposing: false, keyCode: 229 },
+  ])("keeps IME confirmation inside the input (%j)", (composition) => {
+    const { onModelsChange } = renderDirectory();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Display name · gpt-4o" }),
+    );
+    const input = screen.getByRole("textbox", {
+      name: "Display name · gpt-4o",
+    });
+    fireEvent.change(input, { target: { value: "中文" } });
+    fireEvent.keyDown(input, { key: "Enter", ...composition });
+    expect(onModelsChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Display name · gpt-4o" })).toBe(
+      input,
+    );
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onModelsChange.mock.calls.at(-1)?.[0][0]?.name).toBe("中文");
+  });
+
   /** Opens a naming cell and returns its editor. */
   function openCell(name: string): HTMLElement {
     fireEvent.click(screen.getByRole("button", { name }));

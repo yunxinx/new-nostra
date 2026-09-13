@@ -67,7 +67,10 @@ export function SessionList() {
   // the list overflows, and it sits on the boundary with the conversation
   // area. `overflow-x-clip` keeps stray horizontal overflow from adding a
   // second scrollbar.
-  const scrollPane = "min-h-0 flex-1 overflow-x-clip overflow-y-auto p-2";
+  // No top inset: the first row sits directly under the reserved title strip,
+  // the same height every page's first line starts at (the model list's
+  // toolbar, the settings nav's first row).
+  const scrollPane = "min-h-0 flex-1 overflow-x-clip overflow-y-auto px-2 pb-2";
 
   if (isLibraryEmpty) {
     return (

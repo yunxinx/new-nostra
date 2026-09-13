@@ -1,36 +1,56 @@
 import { useTranslation } from "react-i18next";
 
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 
 interface DirtyNoticeProps {
   onCancel: () => void;
   onConfirm: () => void;
+  open: boolean;
 }
 
-// Non-modal guard: the blocked action runs only after the user confirms that
-// the unsaved draft may be discarded. It is a plain surface, not a dialog —
-// the page stays operable while the notice is up.
-export function DirtyNotice({ onCancel, onConfirm }: DirtyNoticeProps) {
+// Modal guard over the blocked action: the page's own confirm never runs
+// before the user answers, and every dismissal — Escape, the overlay, the
+// cancel button — takes the cancel path, so a parked navigation is never
+// answered twice.
+//
+// The confirm is a plain button rather than the dialog's action: the action
+// closes the dialog on its way out, which would fire the cancel path a second
+// time and undo the answer the confirm just gave. Its exit comes from the
+// parent dropping `open` once the discard lands.
+export function DirtyNotice({ onCancel, onConfirm, open }: DirtyNoticeProps) {
   const { t } = useTranslation();
   return (
-    <div
-      className="bg-muted/60 flex shrink-0 items-center justify-between gap-3 px-10 py-2"
-      role="status"
+    <AlertDialog
+      onOpenChange={(next) => {
+        if (!next) {
+          onCancel();
+        }
+      }}
+      open={open}
     >
-      <p className="text-sm">{t("settings.providers.dirtyNotice")}</p>
-      <div className="flex shrink-0 items-center gap-2">
-        <Button onClick={onCancel} size="xs" type="button" variant="ghost">
-          {t("common.cancel")}
-        </Button>
-        <Button
-          onClick={onConfirm}
-          size="xs"
-          type="button"
-          variant="destructive"
-        >
-          {t("settings.providers.discard")}
-        </Button>
-      </div>
-    </div>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("common.unsavedTitle")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("common.unsavedDescription")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+          <Button onClick={onConfirm} size="default" variant="destructive">
+            {t("common.discard")}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

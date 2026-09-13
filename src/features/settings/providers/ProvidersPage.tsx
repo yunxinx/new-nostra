@@ -193,7 +193,7 @@ export function ProvidersPage({
   function renderDetail(): ReactNode {
     if (target.kind === "corrupted") {
       return (
-        <div className="min-h-0 flex-1 overflow-x-clip overflow-y-auto px-10 pb-6">
+        <div className="min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto px-10 pb-6">
           <ProviderCorruptedNotice
             onDeleted={() => draft.afterDelete(target.id)}
             providerId={target.id}
@@ -257,12 +257,11 @@ export function ProvidersPage({
           is. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="h-[34px] shrink-0" data-tauri-drag-region />
-        {(pending !== null || isNavBlocked) && (
-          <DirtyNotice
-            onCancel={handleCancelPending}
-            onConfirm={handleConfirmDiscard}
-          />
-        )}
+        <DirtyNotice
+          onCancel={handleCancelPending}
+          onConfirm={handleConfirmDiscard}
+          open={pending !== null || isNavBlocked}
+        />
         {renderDetail()}
       </div>
     </div>

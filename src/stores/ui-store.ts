@@ -55,6 +55,7 @@ interface UiState {
   themeOverride: ThemeOverride;
   toggleSettingsNavCollapsed: () => void;
   toggleSidebarCollapsed: () => void;
+  transferDraftModel: (draftKey: string, sessionId: string) => void;
 }
 
 /** Draft location for the anonymous new-chat target: `draft:<draftId>`. */
@@ -173,6 +174,15 @@ export const useUiStore = create<UiState>()(
     toggleSidebarCollapsed: () =>
       set((state) => {
         state.sidebarCollapsed = !state.sidebarCollapsed;
+      }),
+    transferDraftModel: (draftKey, sessionId) =>
+      set((state) => {
+        const model = state.modelByDraft.get(draftKey);
+        // A selection made directly in the created session takes precedence.
+        if (model !== undefined && !state.modelByDraft.has(sessionId)) {
+          state.modelByDraft.set(sessionId, model);
+        }
+        state.modelByDraft.delete(draftKey);
       }),
   })),
 );

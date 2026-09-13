@@ -1,25 +1,27 @@
-import { useMemo } from "react";
 import { useWatch } from "react-hook-form";
 
 import type { CompatBuckets } from "@/types/ipc";
 
+import type { CompatInputDrafts } from "../../components/compat/compat-draft";
 import type { ProtocolFamily } from "../../components/compat/compat-fields";
+import type { CompatResolution } from "../../components/compat/use-compat-resolution";
 import type { ProviderDraftController } from "../use-provider-draft";
 
 import {
   overrideRecord,
-  storedBuckets,
   withCompatOverride,
 } from "../../components/compat/compat-values";
+import { CompatResolutionNotice } from "../../components/compat/CompatResolutionNotice";
 import { CompatSection } from "../../components/compat/CompatSection";
-import { useCompatResolution } from "../../components/compat/use-compat-resolution";
-import { BLANK_PROVIDER_DRAFT } from "../draft";
 
 interface ProviderCompatPanelProps {
   baseline?: CompatBuckets | undefined;
   /** The family this pane configures; the switcher above it owns the choice. */
   family: ProtocolFamily;
   form: ProviderDraftController["form"];
+  inputs: CompatInputDrafts;
+  onInputsChange: (inputs: CompatInputDrafts) => void;
+  resolution: CompatResolution;
 }
 
 // The advanced section of the provider form: one protocol family's merged
@@ -33,44 +35,41 @@ export function ProviderCompatPanel({
   baseline,
   family,
   form,
+  inputs,
+  onInputsChange,
+  resolution,
 }: ProviderCompatPanelProps) {
-  const baseUrl = useWatch({ control: form.control, name: "baseUrl" });
   const compat = useWatch({ control: form.control, name: "compat" });
 
-  const families = useMemo(() => [family], [family]);
-  const overrides = useMemo(() => storedBuckets(compat), [compat]);
-  const input = useMemo(
-    () => ({
-      provider: {
-        ...BLANK_PROVIDER_DRAFT,
-        baseUrl,
-        ...(overrides !== undefined && { compat: overrides }),
-      },
-    }),
-    [baseUrl, overrides],
-  );
-  const resolved = useCompatResolution(families, input);
-
   return (
-    <CompatSection
-      baseline={overrideRecord(baseline?.[family])}
-      bucket={overrideRecord(compat?.[family])}
-      family={family}
-      layerSource="provider"
-      onFieldChange={(field, value) => {
-        form.setValue(
-          "compat",
-          withCompatOverride(form.getValues("compat"), family, field, value) ??
-            null,
-          {
-            shouldDirty: true,
-            shouldValidate: form.formState.isSubmitted,
-          },
-        );
-      }}
-      showHeading={false}
-      sources={resolved[family]?.sources ?? {}}
-      values={resolved[family]?.values ?? {}}
-    />
+    <div aria-busy={resolution.isLoading}>
+      <CompatResolutionNotice resolution={resolution} />
+      <CompatSection
+        baseline={overrideRecord(baseline?.[family])}
+        bucket={overrideRecord(compat?.[family])}
+        fallbacks={resolution.data[family]?.values ?? {}}
+        family={family}
+        inputs={inputs}
+        layerSource="provider"
+        onFieldChange={(field, value) => {
+          form.setValue(
+            "compat",
+            withCompatOverride(
+              form.getValues("compat"),
+              family,
+              field,
+              value,
+            ) ?? null,
+            {
+              shouldDirty: true,
+              shouldValidate: form.formState.isSubmitted,
+            },
+          );
+        }}
+        onInputsChange={onInputsChange}
+        showHeading={false}
+        sources={resolution.data[family]?.sources ?? {}}
+      />
+    </div>
   );
 }

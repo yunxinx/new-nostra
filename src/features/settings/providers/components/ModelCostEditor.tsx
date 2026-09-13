@@ -1,21 +1,14 @@
-import type { ReactNode } from "react";
-
 import { Plus, X } from "lucide-react";
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ModelCost } from "@/types/ipc";
 
-import {
-  DataTablePanel,
-  STICKY_TABLE_HEADER,
-} from "@/components/common/DataTablePanel";
+import { DataTablePanel } from "@/components/common/DataTablePanel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -25,24 +18,25 @@ import {
 import { isDeepEqual } from "@/lib/deep-equal";
 
 import { RevertButton } from "../../components/RevertButton";
-import { SettingsRow } from "../../components/SettingsRow";
+import { type CostDraftRow, costDraftRows } from "../cost-draft";
 import {
-  type CostDraft,
-  costDraft,
-  costFromDraft,
-  type CostTierDraft,
-  type PeakDraft,
+  costFromRules,
+  type CostRates,
+  type CostRuleDraft,
+  costRules,
   type PeakWindowDraft,
+  rateValue,
   WEEKDAYS,
 } from "../model-rows";
 
 interface ModelCostEditorProps {
   baseline?: ModelCost | undefined;
   onChange: (cost: ModelCost | undefined) => void;
-  value: ModelCost | undefined;
+  onRowsChange: (rows: CostDraftRow[]) => void;
+  rows: CostDraftRow[];
 }
 
-/** The four rates every price block carries, in the order they are read. */
+/** The four rates every row carries, in the order they are read. */
 const RATE_FIELDS = [
   { key: "input", labelKey: "costInput" },
   { key: "output", labelKey: "costOutput" },
@@ -50,471 +44,395 @@ const RATE_FIELDS = [
   { key: "cacheWrite", labelKey: "costCacheWrite" },
 ] as const;
 
-// Price list of one model, in three blocks that answer one question each: the
-// base rates, the usage tiers that replace them above a token threshold, and
-// the peak rate that replaces them inside a window. Every block is a table,
-// because a price is only legible as a row of a price list — a row of
-// unlabelled boxes has to be read against a legend somewhere else.
+/** Every column of the rule table, for the rows that span them all. */
+const COLUMN_COUNT = RATE_FIELDS.length + 2;
+
+/** One width per column: the condition and the action take theirs, and the
+ *  four rates share what is left. */
+const COLUMNS = [
+  "w-[28%]",
+  ...RATE_FIELDS.map(() => undefined),
+  "w-12",
+] as const;
+
+// One price list as one table of conditions: the base row prices every
+// request, and every row under it names the condition that makes its four
+// rates replace the base row's — a token threshold, or a set of peak windows.
+// Reading a price means reading down one column of conditions, so a model that
+// prices its busy hours or its long requests says so where its base price is,
+// not in a block of its own further down the page.
+//
+// Rows are ordered, and the order is what the stored document keeps: a tier
+// that starts lower than the one above it is read in the order it was written.
+// The stored shape holds one peak block, so the table offers one peak row.
 export function ModelCostEditor({
   baseline,
   onChange,
-  value,
+  onRowsChange,
+  rows,
 }: ModelCostEditorProps) {
   const { t } = useTranslation();
-  const [draft, setDraft] = useState(() => costDraft(value));
-  const stored = costDraft(baseline);
+  const rules = rows.map((row) => row.rule);
+  const stored = costRules(baseline);
+  const hasPeak = rules.some((rule) => rule.kind === "peak");
 
-  function update(next: CostDraft): void {
-    setDraft(next);
-    onChange(costFromDraft(next));
+  function update(next: CostDraftRow[]): void {
+    onRowsChange(next);
+    onChange(costFromRules(next.map((row) => row.rule)));
   }
 
-  function updateTier(index: number, tier: CostTierDraft): void {
-    update({
-      ...draft,
-      tiers: draft.tiers.map((entry, position) =>
-        position === index ? tier : entry,
+  function updateRule(index: number, rule: CostRuleDraft): void {
+    update(
+      rows.map((entry, position) =>
+        position === index ? { ...entry, rule } : entry,
       ),
-    });
+    );
   }
 
-  function handleTogglePeak(checked: boolean): void {
-    update({ ...draft, peak: checked ? blankPeakDraft() : undefined });
+  function addTier(): void {
+    update([
+      ...rows,
+      {
+        baseline: undefined,
+        key: crypto.randomUUID(),
+        rule: { above: "", kind: "tier", rates: blankRates() },
+      },
+    ]);
+  }
+
+  function addPeak(): void {
+    update([
+      ...rows,
+      {
+        baseline: undefined,
+        key: crypto.randomUUID(),
+        rule: { kind: "peak", rates: blankRates(), windows: [blankWindow()] },
+      },
+    ]);
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <CostBlock
-        aside={
-          <span className="text-muted-foreground text-xs">
-            {t("settings.providers.costUnit")}
-          </span>
-        }
-        title={t("settings.providers.costBase")}
-      >
-        <DataTablePanel rows={RATE_FIELDS.length}>
-          <Table
-            className="table-fixed"
-            containerClassName="h-full overflow-y-auto"
-          >
-            <TableHeader className={STICKY_TABLE_HEADER}>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>{t("settings.providers.costItem")}</TableHead>
-                <TableHead className="w-40 text-right">
-                  {t("settings.providers.costRate")}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {RATE_FIELDS.map((field) => (
-                <TableRow className="hover:bg-transparent" key={field.key}>
-                  <TableCell className="text-muted-foreground text-xs">
-                    {t(`settings.providers.${field.labelKey}`)}
-                  </TableCell>
-                  <TableCell className="p-1">
-                    <RateInput
-                      ariaLabel={t(`settings.providers.${field.labelKey}`)}
-                      baseline={stored[field.key]}
-                      onChange={(next) =>
-                        update({ ...draft, [field.key]: next })
-                      }
-                      value={draft[field.key]}
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </DataTablePanel>
-      </CostBlock>
-
-      <CostBlock
-        onRevert={
-          !isDeepEqual(draft.tiers, stored.tiers)
-            ? () => update({ ...draft, tiers: stored.tiers })
-            : undefined
-        }
-        title={t("settings.providers.costTiers")}
-      >
-        <DataTablePanel rows={3}>
-          <Table
-            className="table-fixed"
-            containerClassName="h-full overflow-y-auto"
-          >
-            <TableHeader className={STICKY_TABLE_HEADER}>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="w-24">
-                  {t("settings.providers.costTierAbove")}
-                </TableHead>
-                {RATE_FIELDS.map((field) => (
-                  <TableHead key={field.key}>
-                    {t(`settings.providers.${field.labelKey}`)}
-                  </TableHead>
-                ))}
-                <TableHead className="w-9 pl-0 text-center">
-                  <span className="sr-only">
-                    {t("settings.providers.removeCostTier")}
-                  </span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {draft.tiers.map((tier, index) => (
-                // Tiers are positional and their inputs are controlled from
-                // state, so the index is the row identity.
-                <TableRow className="hover:bg-transparent" key={index}>
-                  <TableCell className="p-1">
-                    <RateInput
-                      ariaLabel={`${t("settings.providers.costTierAbove")} ${String(index + 1)}`}
-                      baseline={stored.tiers[index]?.inputTokensAbove ?? ""}
-                      inputMode="numeric"
-                      onChange={(inputTokensAbove) =>
-                        updateTier(index, { ...tier, inputTokensAbove })
-                      }
-                      value={tier.inputTokensAbove}
-                    />
-                  </TableCell>
-                  {RATE_FIELDS.map((field) => (
-                    <TableCell className="p-1" key={field.key}>
-                      <RateInput
-                        ariaLabel={`${t(`settings.providers.${field.labelKey}`)} ${String(index + 1)}`}
-                        baseline={stored.tiers[index]?.[field.key] ?? ""}
-                        onChange={(next) =>
-                          updateTier(index, { ...tier, [field.key]: next })
-                        }
-                        value={tier[field.key]}
-                      />
-                    </TableCell>
-                  ))}
-                  <TableCell className="p-1 pl-0">
-                    <Button
-                      aria-label={t("settings.providers.removeCostTier")}
-                      onClick={() =>
-                        update({
-                          ...draft,
-                          tiers: draft.tiers.filter(
-                            (_, position) => position !== index,
-                          ),
-                        })
-                      }
-                      size="icon-xs"
-                      type="button"
-                      variant="ghost"
-                    >
-                      <X className="size-3" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {draft.tiers.length === 0 && (
-                <TableRow className="hover:bg-transparent">
-                  <TableCell
-                    className="text-muted-foreground py-3 text-center text-xs"
-                    colSpan={RATE_FIELDS.length + 2}
-                  >
-                    {t("common.emptyRows")}
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </DataTablePanel>
-        <Button
-          onClick={() =>
-            update({ ...draft, tiers: [...draft.tiers, blankTierDraft()] })
-          }
-          size="xs"
-          type="button"
-          variant="ghost"
-        >
-          <Plus className="size-3" />
-          {t("settings.providers.addCostTier")}
-        </Button>
-      </CostBlock>
-
-      <div className="flex flex-col gap-1.5">
-        <SettingsRow
-          label={t("settings.providers.modelCostPeak")}
-          onRevert={
-            !isDeepEqual(draft.peak, stored.peak)
-              ? () => update({ ...draft, peak: stored.peak })
-              : undefined
-          }
-        >
-          <Switch
-            aria-label={t("settings.providers.modelCostPeak")}
-            checked={draft.peak !== undefined}
-            onCheckedChange={handleTogglePeak}
-          />
-        </SettingsRow>
-        {draft.peak !== undefined && (
-          <PeakEditor
-            baseline={stored.peak}
-            draft={draft.peak}
-            onChange={(peak) => update({ ...draft, peak })}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** A new peak block: enabled with one empty window to fill in. */
-function blankPeakDraft(): PeakDraft {
-  return {
-    cacheRead: "",
-    cacheWrite: "",
-    input: "",
-    output: "",
-    windows: [{ days: [], end: "", start: "" }],
-  };
-}
-
-function blankTierDraft(): CostTierDraft {
-  return {
-    cacheRead: "",
-    cacheWrite: "",
-    input: "",
-    inputTokensAbove: "",
-    output: "",
-  };
-}
-
-/** Heading of one price block; `aside` carries the block's unit. */
-function CostBlock({
-  aside,
-  children,
-  onRevert,
-  title,
-}: {
-  aside?: ReactNode;
-  children: ReactNode;
-  onRevert?: (() => void) | undefined;
-  title: string;
-}) {
-  return (
-    <section className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-1.5">
       <div className="flex min-h-5 items-center gap-2">
         <h3 className="text-muted-foreground text-xs font-medium select-none">
-          {title}
+          {t("settings.providers.modelCost")}
         </h3>
-        {aside}
+        <span className="text-muted-foreground text-xs">
+          {t("settings.providers.costUnit")}
+        </span>
+        {!isDeepEqual(costFromRules(rules), costFromRules(stored)) && (
+          <RevertButton onRevert={() => update(costDraftRows(baseline))} />
+        )}
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <Button onClick={addTier} size="xs" type="button" variant="outline">
+            <Plus className="size-3" />
+            {t("settings.providers.addCostTier")}
+          </Button>
+          <Button
+            disabled={hasPeak}
+            onClick={addPeak}
+            size="xs"
+            type="button"
+            variant="outline"
+          >
+            <Plus className="size-3" />
+            {t("settings.providers.addCostPeak")}
+          </Button>
+        </div>
       </div>
-      <div className="flex items-start gap-1.5">
-        {onRevert !== undefined && <RevertButton onRevert={onRevert} />}
-        <div className="min-w-0 flex-1">{children}</div>
-      </div>
-    </section>
-  );
-}
-
-function PeakEditor({
-  baseline,
-  draft,
-  onChange,
-}: {
-  baseline: PeakDraft | undefined;
-  draft: PeakDraft;
-  onChange: (peak: PeakDraft) => void;
-}) {
-  const { t } = useTranslation();
-
-  function handleWindow(index: number, next: PeakWindowDraft): void {
-    onChange({
-      ...draft,
-      windows: draft.windows.map((window, position) =>
-        position === index ? next : window,
-      ),
-    });
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      <DataTablePanel rows={RATE_FIELDS.length}>
-        <Table
-          className="table-fixed"
-          containerClassName="h-full overflow-y-auto"
-        >
-          <TableHeader className={STICKY_TABLE_HEADER}>
+      <DataTablePanel
+        columns={COLUMNS}
+        header={
+          <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead>{t("settings.providers.costItem")}</TableHead>
-              <TableHead className="w-40 text-right">
-                {t("settings.providers.costRate")}
+              <TableHead>{t("settings.providers.costCondition")}</TableHead>
+              {RATE_FIELDS.map((field) => (
+                <TableHead key={field.key}>
+                  {t(`settings.providers.${field.labelKey}`)}
+                </TableHead>
+              ))}
+              <TableHead className="text-center">
+                {t("common.actions")}
               </TableHead>
             </TableRow>
           </TableHeader>
-          <TableBody>
-            {RATE_FIELDS.map((field) => (
-              <TableRow className="hover:bg-transparent" key={field.key}>
-                <TableCell className="text-muted-foreground text-xs">
-                  {t(`settings.providers.${field.labelKey}`)}
-                </TableCell>
-                <TableCell className="p-1">
-                  <RateInput
-                    ariaLabel={`${t("settings.providers.modelCostPeak")} ${t(`settings.providers.${field.labelKey}`)}`}
-                    baseline={baseline?.[field.key] ?? ""}
-                    onChange={(next) =>
-                      onChange({ ...draft, [field.key]: next })
-                    }
-                    value={draft[field.key]}
-                  />
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        }
+        rows={4}
+      >
+        <TableBody>
+          {rows.map((row, index) => (
+            <RuleRows
+              index={index}
+              key={row.key}
+              onRemove={() =>
+                update(rows.filter((_, position) => position !== index))
+              }
+              onRuleChange={(next) => updateRule(index, next)}
+              rule={row.rule}
+              storedRates={row.baseline?.rates}
+            />
+          ))}
+        </TableBody>
       </DataTablePanel>
-
-      <div className="flex flex-col gap-1.5">
-        <h3 className="text-muted-foreground text-xs font-medium select-none">
-          {t("settings.providers.peakWindows")}
-        </h3>
-        <DataTablePanel rows={2}>
-          <Table
-            className="table-fixed"
-            containerClassName="h-full overflow-y-auto"
-          >
-            <TableHeader className={STICKY_TABLE_HEADER}>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>{t("settings.providers.peakWindowDays")}</TableHead>
-                <TableHead className="w-20">
-                  {t("settings.providers.windowStart")}
-                </TableHead>
-                <TableHead className="w-20">
-                  {t("settings.providers.windowEnd")}
-                </TableHead>
-                <TableHead className="w-9 pl-0 text-center">
-                  <span className="sr-only">
-                    {t("settings.providers.removePeakWindow")}
-                  </span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {draft.windows.map((window, index) => (
-                <TableRow className="hover:bg-transparent" key={index}>
-                  <TableCell className="p-1">
-                    <div className="flex flex-wrap items-center gap-x-2">
-                      {WEEKDAYS.map((day) => (
-                        <label className="flex items-center gap-1" key={day}>
-                          <Checkbox
-                            aria-label={`${t(`settings.providers.weekdays.${day}`)} ${String(index + 1)}`}
-                            checked={window.days.includes(day)}
-                            onCheckedChange={() =>
-                              handleWindow(index, {
-                                ...window,
-                                days: window.days.includes(day)
-                                  ? window.days.filter((entry) => entry !== day)
-                                  : [...window.days, day],
-                              })
-                            }
-                          />
-                          <span className="text-xs">
-                            {t(`settings.providers.weekdays.${day}`)}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell className="p-1">
-                    <RateInput
-                      ariaLabel={`${t("settings.providers.windowStart")} ${String(index + 1)}`}
-                      baseline={baseline?.windows[index]?.start ?? ""}
-                      inputMode="numeric"
-                      onChange={(start) =>
-                        handleWindow(index, { ...window, start })
-                      }
-                      value={window.start}
-                    />
-                  </TableCell>
-                  <TableCell className="p-1">
-                    <RateInput
-                      ariaLabel={`${t("settings.providers.windowEnd")} ${String(index + 1)}`}
-                      baseline={baseline?.windows[index]?.end ?? ""}
-                      inputMode="numeric"
-                      onChange={(end) =>
-                        handleWindow(index, { ...window, end })
-                      }
-                      value={window.end}
-                    />
-                  </TableCell>
-                  <TableCell className="p-1 pl-0">
-                    <Button
-                      aria-label={t("settings.providers.removePeakWindow")}
-                      onClick={() =>
-                        onChange({
-                          ...draft,
-                          windows: draft.windows.filter(
-                            (_, position) => position !== index,
-                          ),
-                        })
-                      }
-                      size="icon-xs"
-                      type="button"
-                      variant="ghost"
-                    >
-                      <X className="size-3" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {draft.windows.length === 0 && (
-                <TableRow className="hover:bg-transparent">
-                  <TableCell
-                    className="text-muted-foreground py-3 text-center text-xs"
-                    colSpan={4}
-                  >
-                    {t("common.emptyRows")}
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </DataTablePanel>
-        <Button
-          onClick={() =>
-            onChange({
-              ...draft,
-              windows: [...draft.windows, { days: [], end: "", start: "" }],
-            })
-          }
-          size="xs"
-          type="button"
-          variant="ghost"
-        >
-          <Plus className="size-3" />
-          {t("settings.providers.addPeakWindow")}
-        </Button>
-      </div>
     </div>
+  );
+}
+
+function blankRates(): CostRates {
+  return { cacheRead: "", cacheWrite: "", input: "", output: "" };
+}
+
+function blankWindow(): PeakWindowDraft {
+  return { days: [], end: "", start: "" };
+}
+
+/** The condition cell: fixed text for the base row, an editor for the rest. */
+function ConditionCell({
+  onRuleChange,
+  rule,
+}: {
+  onRuleChange: (rule: CostRuleDraft) => void;
+  rule: CostRuleDraft;
+}) {
+  const { t } = useTranslation();
+  if (rule.kind === "base") {
+    return (
+      <span className="text-muted-foreground text-xs">
+        {t("settings.providers.costBase")}
+      </span>
+    );
+  }
+  if (rule.kind === "peak") {
+    return (
+      <span className="text-muted-foreground text-xs">
+        {t("settings.providers.modelCostPeak")}
+      </span>
+    );
+  }
+  return (
+    <Input
+      aria-label={t("settings.providers.costTierAbove")}
+      className="h-7"
+      inputMode="numeric"
+      onChange={(event) => onRuleChange({ ...rule, above: event.target.value })}
+      placeholder={t("settings.providers.costTierAbove")}
+      value={rule.above}
+    />
+  );
+}
+
+/**
+ * The peak row's windows, as a block spanning the table: a window is what
+ * decides whether the row's rates apply at all, so it belongs to the row it
+ * gates, under it and indented to the condition column.
+ */
+function PeakWindowRows({
+  onWindowsChange,
+  windows,
+}: {
+  onWindowsChange: (windows: PeakWindowDraft[]) => void;
+  windows: PeakWindowDraft[];
+}) {
+  const { t } = useTranslation();
+  return (
+    <TableRow className="hover:bg-transparent">
+      <TableCell className="p-0" colSpan={COLUMN_COUNT}>
+        <div className="flex flex-col gap-1.5 px-2 py-2">
+          <span className="text-muted-foreground text-xs">
+            {t("settings.providers.peakWindows")}
+          </span>
+          {windows.map((window, index) => (
+            <div
+              className="flex flex-wrap items-center gap-x-2 gap-y-1"
+              key={index}
+            >
+              <div className="flex flex-wrap items-center gap-x-2">
+                {WEEKDAYS.map((day) => (
+                  <label className="flex items-center gap-1" key={day}>
+                    <Checkbox
+                      aria-label={`${t(`settings.providers.weekdays.${day}`)} ${String(index + 1)}`}
+                      checked={window.days.includes(day)}
+                      onCheckedChange={() =>
+                        onWindowsChange(
+                          windows.map((entry, position) =>
+                            position === index
+                              ? {
+                                  ...entry,
+                                  days: entry.days.includes(day)
+                                    ? entry.days.filter(
+                                        (entry) => entry !== day,
+                                      )
+                                    : [...entry.days, day],
+                                }
+                              : entry,
+                          ),
+                        )
+                      }
+                    />
+                    <span className="text-xs">
+                      {t(`settings.providers.weekdays.${day}`)}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <Input
+                aria-label={`${t("settings.providers.windowStart")} ${String(index + 1)}`}
+                className="h-7 w-20"
+                onChange={(event) =>
+                  onWindowsChange(
+                    windows.map((entry, position) =>
+                      position === index
+                        ? { ...entry, start: event.target.value }
+                        : entry,
+                    ),
+                  )
+                }
+                value={window.start}
+              />
+              <span className="text-muted-foreground text-xs">–</span>
+              <Input
+                aria-label={`${t("settings.providers.windowEnd")} ${String(index + 1)}`}
+                className="h-7 w-20"
+                onChange={(event) =>
+                  onWindowsChange(
+                    windows.map((entry, position) =>
+                      position === index
+                        ? { ...entry, end: event.target.value }
+                        : entry,
+                    ),
+                  )
+                }
+                value={window.end}
+              />
+              <IconButton
+                aria-label={t("settings.providers.removePeakWindow")}
+                onClick={() =>
+                  onWindowsChange(
+                    windows.filter((_, position) => position !== index),
+                  )
+                }
+                size="icon-xs"
+                type="button"
+                variant="destructive"
+              >
+                <X className="size-3" />
+              </IconButton>
+            </div>
+          ))}
+          <Button
+            className="self-start"
+            onClick={() => onWindowsChange([...windows, blankWindow()])}
+            size="xs"
+            type="button"
+            variant="ghost"
+          >
+            <Plus className="size-3" />
+            {t("settings.providers.addPeakWindow")}
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
   );
 }
 
 function RateInput({
   ariaLabel,
   baseline,
-  inputMode,
   onChange,
   value,
 }: {
   ariaLabel: string;
-  baseline?: string;
-  inputMode?: "decimal" | "numeric";
+  baseline?: string | undefined;
   onChange: (value: string) => void;
   value: string;
 }) {
   return (
     <div className="flex items-center gap-1.5">
-      {baseline !== undefined && baseline !== value && (
-        <RevertButton onRevert={() => onChange(baseline)} />
-      )}
+      {baseline !== undefined &&
+        (baseline.trim() === ""
+          ? value.trim() !== ""
+          : rateValue(baseline) !== rateValue(value)) && (
+          <RevertButton onRevert={() => onChange(baseline)} />
+        )}
       <Input
         aria-label={ariaLabel}
         className="h-7 text-right tabular-nums"
-        inputMode={inputMode ?? "decimal"}
+        inputMode="decimal"
         onChange={(event) => onChange(event.target.value)}
         value={value}
       />
     </div>
+  );
+}
+
+function RuleRows({
+  index,
+  onRemove,
+  onRuleChange,
+  rule,
+  storedRates,
+}: {
+  index: number;
+  onRemove: () => void;
+  onRuleChange: (rule: CostRuleDraft) => void;
+  rule: CostRuleDraft;
+  storedRates: CostRates | undefined;
+}) {
+  const { t } = useTranslation();
+  const isPeak = rule.kind === "peak";
+  const removeLabel = isPeak
+    ? t("settings.providers.removeCostPeak")
+    : t("settings.providers.removeCostTier");
+  // The row's own name, so four identical rate boxes are still told apart.
+  const rowLabel =
+    rule.kind === "base"
+      ? t("settings.providers.costBase")
+      : rule.kind === "peak"
+        ? t("settings.providers.modelCostPeak")
+        : `${t("settings.providers.costTierAbove")} ${String(index)}`;
+  return (
+    <>
+      <TableRow className="hover:bg-transparent">
+        <TableCell className="min-w-0">
+          <ConditionCell onRuleChange={onRuleChange} rule={rule} />
+        </TableCell>
+        {RATE_FIELDS.map((field) => (
+          <TableCell className="p-1" key={field.key}>
+            <RateInput
+              ariaLabel={`${rowLabel} ${t(`settings.providers.${field.labelKey}`)}`}
+              baseline={storedRates?.[field.key]}
+              onChange={(next) =>
+                onRuleChange({
+                  ...rule,
+                  rates: { ...rule.rates, [field.key]: next },
+                })
+              }
+              value={rule.rates[field.key]}
+            />
+          </TableCell>
+        ))}
+        <TableCell className="p-1">
+          {rule.kind === "base" ? null : (
+            <div className="flex justify-center">
+              <IconButton
+                aria-label={removeLabel}
+                onClick={onRemove}
+                size="icon-xs"
+                type="button"
+                variant="destructive"
+              >
+                <X className="size-3" />
+              </IconButton>
+            </div>
+          )}
+        </TableCell>
+      </TableRow>
+      {isPeak && (
+        <PeakWindowRows
+          onWindowsChange={(windows) => onRuleChange({ ...rule, windows })}
+          windows={rule.windows}
+        />
+      )}
+    </>
   );
 }

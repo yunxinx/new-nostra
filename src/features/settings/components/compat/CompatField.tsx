@@ -1,15 +1,8 @@
-import { RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { CompatSource, JsonValue } from "@/types/ipc";
 
-import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-
+import type { CompatInputDraft } from "./compat-draft";
 import type { CompatFieldDescriptor } from "./compat-fields";
 
 import { RevertButton } from "../RevertButton";
@@ -22,10 +15,9 @@ import { CompatSwitchField } from "./CompatSwitchField";
 
 interface CompatFieldProps {
   descriptor: CompatFieldDescriptor;
-  /** Whether the edited layer overrides the field (the layer's own key is set). */
-  isOverridden: boolean;
+  input: CompatInputDraft | undefined;
   onCommit: (value: JsonValue | null) => void;
-  onRestore: () => void;
+  onInputChange: (input: CompatInputDraft | undefined) => void;
   onRevert?: (() => void) | undefined;
   /** Winning layer of the shown value; absent while the value is unset. */
   source: CompatSource | undefined;
@@ -33,35 +25,61 @@ interface CompatFieldProps {
   value: JsonValue | undefined;
 }
 
-// One compat field: label with its explanation and provenance on the left, the
-// control and the restore action on the right. The row is a named group so a
-// field and its control stay addressable together.
+// One compat field: the field's name with its explanation and provenance on
+// the left, the control and the restore action on the right. The row is a
+// named group so a field and its control stay addressable together.
+//
+// A table of pairs is the one control that names itself and owns its own
+// heading, so it takes the row whole: wrapping it in a row of its own would
+// put the field's name on the pane twice.
 export function CompatField({
   descriptor,
-  isOverridden,
+  input,
   onCommit,
-  onRestore,
+  onInputChange,
   onRevert,
   source,
   value,
 }: CompatFieldProps) {
   const { t } = useTranslation();
   const label = t(`settings.providers.compatFields.${descriptor.name}`);
+  const info = t(`settings.providers.compatFields.${descriptor.name}Desc`);
+  const actions =
+    source === undefined ? null : <CompatSourceBadge source={source} />;
 
+  if (descriptor.kind === "map") {
+    return (
+      // The row keeps the settings row shape; the named group around it scopes
+      // the field, whose name repeats across families.
+      <div aria-label={label} role="group">
+        <CompatMapField
+          actions={actions}
+          info={info}
+          label={label}
+          onChange={onCommit}
+          onRevert={onRevert}
+          value={value}
+        />
+      </div>
+    );
+  }
+
+  // The map is handled above, so this switch never sees it: it renders the
+  // controls that share the row with the field's name.
   function renderControl() {
     switch (descriptor.kind) {
       case "json":
+      case "list":
         return (
           <CompatJsonField
+            input={input}
+            kind={descriptor.kind}
             label={label}
             onChange={onCommit}
+            onInputChange={onInputChange}
             parseValue={descriptor.parseValue}
             value={value}
           />
-        );
-      case "map":
-        return (
-          <CompatMapField label={label} onChange={onCommit} value={value} />
         );
       case "select":
         return (
@@ -84,37 +102,23 @@ export function CompatField({
   }
 
   return (
-    // The row keeps the settings row shape; the named group around it scopes
-    // the field, whose name repeats across families.
     <div aria-label={label} role="group">
       <SettingsRow
-        info={t(`settings.providers.compatFields.${descriptor.name}Desc`)}
+        info={info}
         label={label}
-        layout={descriptor.kind === "map" ? "stacked" : "inline"}
+        // A list is a block of text, so it hangs from the label's line rather
+        // than sharing it.
+        layout={descriptor.kind === "list" ? "stacked" : "inline"}
       >
         <div className="flex items-center gap-1.5">
-          {source !== undefined && <CompatSourceBadge source={source} />}
-          {isOverridden && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  aria-label={t("settings.providers.restoreDefault")}
-                  onClick={onRestore}
-                  size="icon-xs"
-                  type="button"
-                  variant="ghost"
-                >
-                  <RotateCcw className="size-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {t("settings.providers.restoreDefault")}
-              </TooltipContent>
-            </Tooltip>
-          )}
+          {actions}
           {onRevert !== undefined && <RevertButton onRevert={onRevert} />}
+          {/* A list is a block of text on a line of its own, so it takes the
+              whole width that line has left. */}
           <div
-            className={descriptor.kind === "map" ? "min-w-0 flex-1" : "min-w-0"}
+            className={
+              descriptor.kind === "list" ? "min-w-0 flex-1" : "min-w-0"
+            }
           >
             {renderControl()}
           </div>

@@ -3,8 +3,13 @@ import { useTranslation } from "react-i18next";
 
 import type { CompatSource, JsonValue } from "@/types/ipc";
 
-import { isDeepEqual } from "@/lib/deep-equal";
+import { changedValueCount } from "@/lib/draft-values";
 
+import {
+  canonicalCompatValue,
+  type CompatInputDrafts,
+  withCompatInput,
+} from "./compat-draft";
 import { compatFieldsFor, type ProtocolFamily } from "./compat-fields";
 import { CompatField } from "./CompatField";
 
@@ -12,11 +17,19 @@ interface CompatSectionProps {
   baseline?: Record<string, JsonValue>;
   /** This layer's overrides in the family, as the wire shape holds them. */
   bucket: Record<string, JsonValue>;
+  /**
+   * Effective values of the layers under this one, keyed by field name. An
+   * override that repeats one of them is what a preset leaves behind, and
+   * dropping it would move the document without moving a value.
+   */
+  fallbacks: Record<string, JsonValue>;
   family: ProtocolFamily;
+  inputs: CompatInputDrafts;
   /** Source tag this layer's own overrides report as theirs. */
   layerSource: CompatSource;
   /** Writes one field into (`value`) or out of (`null`) this layer. */
   onFieldChange: (field: string, value: JsonValue | null) => void;
+  onInputsChange: (inputs: CompatInputDrafts) => void;
   /**
    * Whether the section heads itself with the family name. A panel that names
    * the family in a tab turns this off, so the name appears exactly once.
@@ -24,8 +37,6 @@ interface CompatSectionProps {
   showHeading?: boolean;
   /** Winning layer per effective value, from the resolution. */
   sources: Record<string, CompatSource>;
-  /** Merged effective values of the family, from the resolution. */
-  values: Record<string, JsonValue>;
 }
 
 // One protocol family of the compat panel: a heading and one row per field of
@@ -34,24 +45,26 @@ interface CompatSectionProps {
 export function CompatSection({
   baseline,
   bucket,
+  fallbacks,
   family,
+  inputs,
   layerSource,
   onFieldChange,
+  onInputsChange,
   showHeading = true,
   sources,
-  values,
 }: CompatSectionProps) {
   const { t } = useTranslation();
-  // Restoring drops the layer's key; the stateful editors (map, JSON) hold
-  // local text, so the row is re-keyed to re-read the fallen-back value.
+  // A map can hold unfinished rows absent from its stored value; reverting remounts it.
   const [restored, setRestored] = useState<Record<string, number>>({});
 
-  function restore(field: string, value: JsonValue | null = null): void {
+  function revert(field: string): void {
     setRestored((current) => ({
       ...current,
       [field]: (current[field] ?? 0) + 1,
     }));
-    onFieldChange(field, value);
+    onInputsChange(withCompatInput(inputs, family, field, undefined));
+    onFieldChange(field, baseline?.[field] ?? null);
   }
 
   return (
@@ -73,20 +86,39 @@ export function CompatSection({
         return (
           <CompatField
             descriptor={descriptor}
-            isOverridden={isOverridden}
+            input={inputs[family]?.[descriptor.name]}
             key={`${descriptor.name}:${String(restored[descriptor.name] ?? 0)}`}
-            onCommit={(value) => onFieldChange(descriptor.name, value)}
-            onRestore={() => restore(descriptor.name)}
+            onCommit={(value) =>
+              onFieldChange(
+                descriptor.name,
+                canonicalCompatValue(
+                  descriptor.kind,
+                  value,
+                  baseline?.[descriptor.name],
+                  fallbacks[descriptor.name],
+                ),
+              )
+            }
+            onInputChange={(input) =>
+              onInputsChange(
+                withCompatInput(inputs, family, descriptor.name, input),
+              )
+            }
             onRevert={
               baseline !== undefined &&
-              !isDeepEqual(baseline[descriptor.name], bucket[descriptor.name])
-                ? () =>
-                    restore(descriptor.name, baseline[descriptor.name] ?? null)
+              (changedValueCount(
+                baseline[descriptor.name],
+                bucket[descriptor.name],
+              ) > 0 ||
+                inputs[family]?.[descriptor.name]?.isInvalid === true)
+                ? () => revert(descriptor.name)
                 : undefined
             }
             source={isOverridden ? layerSource : sources[descriptor.name]}
             value={
-              isOverridden ? bucket[descriptor.name] : values[descriptor.name]
+              isOverridden
+                ? bucket[descriptor.name]
+                : fallbacks[descriptor.name]
             }
           />
         );

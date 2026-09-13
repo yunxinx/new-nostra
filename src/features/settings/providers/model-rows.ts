@@ -61,33 +61,27 @@ export type ClearedModelKey =
   | "samplingParams"
   | "thinkingLevelMap";
 
-/** The cost editor's text state; numbers stay text so typing is never rewritten. */
-export interface CostDraft {
+/** The four rate texts one price row carries. */
+export interface CostRates {
   cacheRead: string;
   cacheWrite: string;
   input: string;
-  output: string;
-  peak: PeakDraft | undefined;
-  tiers: CostTierDraft[];
-}
-
-/** One cost tier as the editor holds it: five numeric texts. */
-export interface CostTierDraft {
-  cacheRead: string;
-  cacheWrite: string;
-  input: string;
-  inputTokensAbove: string;
   output: string;
 }
 
-/** The peak block of the cost editor. */
-export interface PeakDraft {
-  cacheRead: string;
-  cacheWrite: string;
-  input: string;
-  output: string;
-  windows: PeakWindowDraft[];
-}
+/**
+ * One row of the price table: the four rates, and the condition under which
+ * they replace the base row's. `base` carries no condition and prices every
+ * request; a `tier` applies above an input-token threshold; `peak` applies
+ * inside its windows. Both override kinds replace the base row, never each
+ * other, so the table reads as one list of conditions rather than as two
+ * separate price blocks. The stored shape holds a single `peak` block, so the
+ * table holds at most one `peak` row.
+ */
+export type CostRuleDraft =
+  | { above: string; kind: "tier"; rates: CostRates }
+  | { kind: "base"; rates: CostRates }
+  | { kind: "peak"; rates: CostRates; windows: PeakWindowDraft[] };
 
 /** One peak window as the editor holds it. */
 export interface PeakWindowDraft {
@@ -104,41 +98,59 @@ export function addModelRow(models: ModelEntry[], api: Protocol): ModelEntry[] {
   return [...models, { ...BLANK_MODEL_ENTRY, apis: [api] }];
 }
 
-/** Text state for one stored price list; an absent list opens blank. */
-export function costDraft(cost: ModelCost | undefined): CostDraft {
-  return {
-    cacheRead: rateText(cost?.cacheRead),
-    cacheWrite: rateText(cost?.cacheWrite),
-    input: rateText(cost?.input),
-    output: rateText(cost?.output),
-    peak: cost?.peak === undefined ? undefined : peakDraft(cost.peak),
-    tiers: (cost?.tiers ?? []).map(tierDraft),
-  };
-}
-
 /**
- * The submitted price list: absent while every text is blank and no tier or
- * peak exists, so a row that never priced anything stores no `cost` key.
+ * The submitted price list: absent while the base row is blank and no
+ * conditional row was added, so a model that was never priced stores no `cost`
+ * key. A row the user added counts however blank it is — its condition is the
+ * edit, and dropping it would hide the reason the schema rejects it. A tier
+ * keeps its zero threshold on the way out, which is what lets the save-time
+ * schema report it instead of the write silently dropping the row.
  */
-export function costFromDraft(draft: CostDraft): ModelCost | undefined {
-  const isBlank =
-    draft.cacheRead.trim() === "" &&
-    draft.cacheWrite.trim() === "" &&
-    draft.input.trim() === "" &&
-    draft.output.trim() === "" &&
-    draft.tiers.length === 0 &&
-    draft.peak === undefined;
-  if (isBlank) {
+export function costFromRules(rules: CostRuleDraft[]): ModelCost | undefined {
+  const base = rules.find(
+    (rule): rule is Extract<CostRuleDraft, { kind: "base" }> =>
+      rule.kind === "base",
+  );
+  if (base === undefined) {
+    return undefined;
+  }
+  const tiers = rules.flatMap((rule) => (rule.kind === "tier" ? [rule] : []));
+  const peak = rules.find(
+    (rule): rule is Extract<CostRuleDraft, { kind: "peak" }> =>
+      rule.kind === "peak",
+  );
+  if (isBlankRates(base.rates) && tiers.length === 0 && peak === undefined) {
     return undefined;
   }
   return {
-    cacheRead: rateValue(draft.cacheRead),
-    cacheWrite: rateValue(draft.cacheWrite),
-    input: rateValue(draft.input),
-    output: rateValue(draft.output),
-    ...(draft.peak !== undefined && { peak: peakFromDraft(draft.peak) }),
-    ...(draft.tiers.length > 0 && { tiers: draft.tiers.map(tierFromDraft) }),
+    ...ratesOf(base.rates),
+    ...(peak !== undefined && { peak: peakFromRule(peak) }),
+    ...(tiers.length > 0 && { tiers: tiers.map(tierFromRule) }),
   };
+}
+
+/** Text state for one stored price list; an absent list opens as the base row. */
+export function costRules(cost: ModelCost | undefined): CostRuleDraft[] {
+  const base: CostRuleDraft = {
+    kind: "base",
+    rates: {
+      cacheRead: rateText(cost?.cacheRead),
+      cacheWrite: rateText(cost?.cacheWrite),
+      input: rateText(cost?.input),
+      output: rateText(cost?.output),
+    },
+  };
+  const tiers: CostRuleDraft[] = (cost?.tiers ?? []).map((tier) => ({
+    above: rateText(tier.inputTokensAbove),
+    kind: "tier",
+    rates: {
+      cacheRead: rateText(tier.cacheRead),
+      cacheWrite: rateText(tier.cacheWrite),
+      input: rateText(tier.input),
+      output: rateText(tier.output),
+    },
+  }));
+  return [base, ...tiers, ...peakRule(cost?.peak)];
 }
 
 /** True when any leaf of an error subtree carries a message. */
@@ -338,6 +350,15 @@ function dropModelKey(model: ModelEntry, key: ClearedModelKey): void {
   }
 }
 
+function isBlankRates(rates: CostRates): boolean {
+  return (
+    rates.cacheRead.trim() === "" &&
+    rates.cacheWrite.trim() === "" &&
+    rates.input.trim() === "" &&
+    rates.output.trim() === ""
+  );
+}
+
 function isRecord(node: unknown): node is Record<string, unknown> {
   return typeof node === "object" && node !== null;
 }
@@ -347,25 +368,14 @@ function jsonLiteralText(value: JsonValue): string {
   return JSON.stringify(value);
 }
 
-/** Text state for one stored peak block. */
-function peakDraft(peak: PeakPricing): PeakDraft {
-  return {
-    cacheRead: rateText(peak.cacheRead),
-    cacheWrite: rateText(peak.cacheWrite),
-    input: rateText(peak.input),
-    output: rateText(peak.output),
-    windows: peak.windows.map(windowDraft),
-  };
-}
-
 /** The submitted peak block; an empty day list means every day. */
-function peakFromDraft(draft: PeakDraft): PeakPricing {
+function peakFromRule(rule: {
+  rates: CostRates;
+  windows: PeakWindowDraft[];
+}): PeakPricing {
   return {
-    cacheRead: rateValue(draft.cacheRead),
-    cacheWrite: rateValue(draft.cacheWrite),
-    input: rateValue(draft.input),
-    output: rateValue(draft.output),
-    windows: draft.windows.map((window) => ({
+    ...ratesOf(rule.rates),
+    windows: rule.windows.map((window) => ({
       end: window.end,
       start: window.start,
       ...(window.days.length > 0 && { days: window.days }),
@@ -373,23 +383,46 @@ function peakFromDraft(draft: PeakDraft): PeakPricing {
   };
 }
 
-function tierDraft(tier: ModelCostTier): CostTierDraft {
+/** The stored peak row, or none: an absent block contributes no row. */
+function peakRule(peak: PeakPricing | undefined): CostRuleDraft[] {
+  if (peak === undefined) {
+    return [];
+  }
+  return [
+    {
+      kind: "peak",
+      rates: {
+        cacheRead: rateText(peak.cacheRead),
+        cacheWrite: rateText(peak.cacheWrite),
+        input: rateText(peak.input),
+        output: rateText(peak.output),
+      },
+      windows: peak.windows.map(windowDraft),
+    },
+  ];
+}
+
+function ratesOf(rates: CostRates): {
+  cacheRead: number;
+  cacheWrite: number;
+  input: number;
+  output: number;
+} {
   return {
-    cacheRead: rateText(tier.cacheRead),
-    cacheWrite: rateText(tier.cacheWrite),
-    input: rateText(tier.input),
-    inputTokensAbove: rateText(tier.inputTokensAbove),
-    output: rateText(tier.output),
+    cacheRead: rateValue(rates.cacheRead),
+    cacheWrite: rateValue(rates.cacheWrite),
+    input: rateValue(rates.input),
+    output: rateValue(rates.output),
   };
 }
 
-function tierFromDraft(draft: CostTierDraft): ModelCostTier {
+function tierFromRule(rule: {
+  above: string;
+  rates: CostRates;
+}): ModelCostTier {
   return {
-    cacheRead: rateValue(draft.cacheRead),
-    cacheWrite: rateValue(draft.cacheWrite),
-    input: rateValue(draft.input),
-    inputTokensAbove: rateValue(draft.inputTokensAbove),
-    output: rateValue(draft.output),
+    ...ratesOf(rule.rates),
+    inputTokensAbove: rateValue(rule.above),
   };
 }
 

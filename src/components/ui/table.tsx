@@ -6,8 +6,13 @@ import * as React from "react";
 function Table({
   className,
   containerClassName,
+  ref,
   ...props
-}: React.ComponentProps<"table"> & { containerClassName?: string }) {
+}: Omit<React.ComponentProps<"table">, "ref"> & {
+  containerClassName?: string;
+  /** Addresses the scrolling wrapper, not the `table` element it holds. */
+  ref?: React.Ref<HTMLDivElement>;
+}) {
   return (
     <div
       className={cn(
@@ -18,6 +23,7 @@ function Table({
         containerClassName ?? "overflow-x-auto",
       )}
       data-slot="table-container"
+      ref={ref}
     >
       <table
         className={cn("w-full caption-bottom text-sm", className)}

@@ -26,11 +26,18 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { PROTOCOL_FAMILIES } from "@/lib/protocols";
 
 import type { ProviderDraftController } from "../use-provider-draft";
 
+import {
+  hasCustomCompat,
+  hasInvalidCompatInputs,
+  restoreCompatDefaults,
+} from "../../components/compat/compat-draft";
 import { compatFamiliesFor } from "../../components/compat/compat-fields";
 import { storedBuckets } from "../../components/compat/compat-values";
+import { useCompatResolution } from "../../components/compat/use-compat-resolution";
 import { SettingsRow } from "../../components/SettingsRow";
 import { protocolFamilySchema } from "../../schemas/compat";
 import { BLANK_PROVIDER_DRAFT, type ProviderDraftField } from "../draft";
@@ -95,9 +102,20 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
   const api = useWatch({ control, name: "api" });
   const baseUrl = useWatch({ control, name: "baseUrl" });
   const compat = useWatch({ control, name: "compat" });
+  const defaultsInput = useMemo(
+    () => ({ provider: { ...BLANK_PROVIDER_DRAFT, baseUrl } }),
+    [baseUrl],
+  );
+  const defaults = useCompatResolution(PROTOCOL_FAMILIES, defaultsInput);
+  const presetId = Object.values(defaults.data).find(
+    (resolution) => resolution.presetId !== undefined,
+  )?.presetId;
+  const canRestoreDefaults =
+    hasInvalidCompatInputs(controller.compatInputs) ||
+    hasCustomCompat(storedBuckets(compat), defaults.data);
   const [section, setSection] = useState<string>(SECTIONS[0]);
   const [requestedFamily, setRequestedFamily] = useState<null | string>(null);
-  const [openModelIndex, setOpenModelIndex] = useState<null | number>(null);
+  const [openModelKey, setOpenModelKey] = useState<null | string>(null);
   // The families the directory resolves against, and the one the advanced pane
   // shows. Both are decided here because the switcher that picks the family
   // shares this form's tab strip with the section switcher.
@@ -118,15 +136,10 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
       ? "settings.providers.hideKey"
       : "settings.providers.revealKey",
   );
-  // The open row as one value: an index whose row is gone (a delete, a
-  // shorter baseline after a save) reads as "no row open" rather than as a
-  // detail over nothing.
-  const openRow =
-    openModelIndex === null
-      ? undefined
-      : controller.models[openModelIndex] === undefined
-        ? undefined
-        : { index: openModelIndex, model: controller.models[openModelIndex] };
+  const openModelIndex = controller.modelRows.findIndex(
+    (row) => row.key === openModelKey,
+  );
+  const openRow = controller.modelRows[openModelIndex];
   // The layers under a model's own overrides: the model editor resolves
   // against the draft as it stands, not against the stored row.
   const compatProvider = useMemo<ProviderDraft>(() => {
@@ -139,9 +152,15 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
     };
   }, [api, baseUrl, compat]);
   const invalidSections = {
-    advanced: errors.compat !== undefined,
+    advanced:
+      errors.compat !== undefined ||
+      hasInvalidCompatInputs(controller.compatInputs),
     general: GENERAL_FIELDS.some((field) => errors[field] !== undefined),
-    models: errors.models !== undefined,
+    models:
+      errors.models !== undefined ||
+      controller.modelRows.some((row) =>
+        hasInvalidCompatInputs(row.editor.compatInputs),
+      ),
   };
 
   function handleSubmit(event: SubmitEvent<HTMLFormElement>): void {
@@ -173,7 +192,7 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
             labels instead of dropping it onto a second line. */}
         {/* The pane's 40px inset on both sides: the section panes below carry
             the same inset, so the strip's edges line up with theirs. */}
-        <div className="flex shrink-0 items-center gap-x-3 pt-2 pr-10 pb-3 pl-10">
+        <div className="flex shrink-0 items-center gap-x-3 pr-10 pb-3 pl-10">
           <TabsList
             className="shrink-0"
             segmentCount={SECTIONS.length}
@@ -216,7 +235,7 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
             section the user was reading. */}
         <div className="flex min-h-0 flex-1 flex-col" key={controller.revision}>
           <TabsContent
-            className="min-h-0 flex-1 overflow-x-clip overflow-y-auto px-10 pb-6"
+            className="min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto px-10 pb-6"
             value="general"
           >
             <SettingsRow
@@ -404,26 +423,25 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
                 )}
               />
             </SettingsRow>
-            <SettingsRow
-              info={t("settings.providers.headersDesc")}
-              label={t("settings.providers.headers")}
-              layout="stacked"
-              {...revertOf("headers")}
-            >
-              <Controller
-                control={control}
-                name="headers"
-                render={({ field }) => (
-                  <HeadersEditor
-                    onChange={field.onChange}
-                    value={field.value}
-                  />
-                )}
-              />
-            </SettingsRow>
+            <Controller
+              control={control}
+              name="headers"
+              render={({ field }) => (
+                <HeadersEditor
+                  info={t("settings.providers.headersDesc")}
+                  label={t("settings.providers.headers")}
+                  onChange={field.onChange}
+                  onRevert={revertOf("headers").onRevert}
+                  value={field.value}
+                />
+              )}
+            />
           </TabsContent>
+          {/* The directory's table is the pane's content and fills it to the
+              footer; the model editor is a scrolling form and carries the
+              bottom inset itself. */}
           <TabsContent
-            className="flex min-h-0 flex-1 flex-col px-10 pb-6"
+            className="flex min-h-0 flex-1 flex-col px-10"
             value="models"
           >
             {openRow === undefined ? (
@@ -432,29 +450,25 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
                 errors={errors.models}
                 modelRows={controller.modelRows}
                 onModelsChange={controller.updateModelRows}
-                onOpenModel={setOpenModelIndex}
+                onOpenModel={setOpenModelKey}
               />
             ) : (
               <ModelDetail
-                baseline={controller.modelRows[openRow.index]?.baseline}
-                errors={errors.models?.[openRow.index]}
+                baseline={openRow.baseline}
+                editor={openRow.editor}
+                errors={errors.models?.[openModelIndex]}
                 model={openRow.model}
-                onBack={() => setOpenModelIndex(null)}
-                onChange={(next) =>
-                  controller.updateModelRows(
-                    controller.modelRows.map((entry, position) =>
-                      position === openRow.index
-                        ? { ...entry, model: next }
-                        : entry,
-                    ),
-                  )
+                onBack={() => setOpenModelKey(null)}
+                onChange={(model) => controller.updateModel(openRow.key, model)}
+                onEditorChange={(editor) =>
+                  controller.updateModelEditor(openRow.key, editor)
                 }
                 provider={compatProvider}
               />
             )}
           </TabsContent>
           <TabsContent
-            className="min-h-0 flex-1 overflow-x-clip overflow-y-auto px-10 pb-6"
+            className="min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto px-10 pb-6"
             value="advanced"
           >
             {activeFamily !== undefined && (
@@ -462,6 +476,9 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
                 baseline={controller.baseline.compat}
                 family={activeFamily}
                 form={controller.form}
+                inputs={controller.compatInputs}
+                onInputsChange={controller.updateCompatInputs}
+                resolution={defaults}
               />
             )}
           </TabsContent>
@@ -495,6 +512,29 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
               })}
             </Badge>
           )}
+          {section === "advanced" && presetId !== undefined && (
+            <Button
+              disabled={
+                controller.isSaving ||
+                defaults.isLoading ||
+                defaults.error !== null ||
+                !canRestoreDefaults
+              }
+              onClick={() =>
+                controller.restoreCompat(
+                  restoreCompatDefaults(
+                    controller.baseline.compat,
+                    defaults.data,
+                  ),
+                )
+              }
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {t("settings.providers.restoreDefault")}
+            </Button>
+          )}
           <Button
             disabled={!controller.isChanged || controller.isSaving}
             onClick={controller.discard}
@@ -504,7 +544,11 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
           >
             {t("settings.providers.reset")}
           </Button>
-          <Button disabled={controller.isSaving} size="sm" type="submit">
+          <Button
+            disabled={controller.isSaving || controller.hasInvalidInputs}
+            size="sm"
+            type="submit"
+          >
             {controller.isSaving ? t("common.saving") : t("common.save")}
           </Button>
         </div>

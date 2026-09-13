@@ -2,10 +2,10 @@ import { useTranslation } from "react-i18next";
 
 import type { ModelEntry } from "@/types/ipc";
 
+import { DataTablePanel } from "@/components/common/DataTablePanel";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -28,6 +28,11 @@ interface ModelThinkingLevelsProps {
 // the key out (the protocol family default applies), on with an empty value
 // disables the level (an explicit null), on with text sends that text
 // upstream.
+//
+// It is the key/value table's shape — a well of fixed height with a header
+// row of its own and an actions column — so the two maps a model carries read
+// as the same control. The levels are fixed, so the actions column carries the one
+// action a row has: putting that level back to the stored value.
 export function ModelThinkingLevels({
   baseline,
   model,
@@ -36,86 +41,83 @@ export function ModelThinkingLevels({
   const { t } = useTranslation();
   const map = model.thinkingLevelMap;
   return (
-    <div className="w-72">
-      <Table className="table-fixed">
+    <DataTablePanel
+      columns={["w-28", "w-12", undefined, "w-12"]}
+      header={
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            <TableHead className="w-20">
-              {t("settings.providers.thinkingLevelHeader")}
-            </TableHead>
-            <TableHead className="w-9 text-center">
+            <TableHead>{t("settings.providers.thinkingLevelHeader")}</TableHead>
+            <TableHead className="text-center">
               {t("settings.providers.thinkingOverrideHeader")}
             </TableHead>
             <TableHead>{t("settings.providers.thinkingValueHeader")}</TableHead>
+            <TableHead className="text-center">{t("common.actions")}</TableHead>
           </TableRow>
         </TableHeader>
-        <TableBody>
-          {THINKING_LEVELS.map((level) => {
-            const label = t(`settings.providers.thinkingLevels.${level}`);
-            const isOverridden = map !== undefined && level in map;
-            return (
-              <TableRow className="hover:bg-transparent" key={level}>
-                <TableCell className="text-muted-foreground p-1 text-xs">
-                  {label}
-                </TableCell>
-                <TableCell className="p-1">
-                  <div className="flex justify-center">
-                    <Checkbox
-                      aria-label={label}
-                      checked={isOverridden}
-                      onCheckedChange={(checked) =>
-                        onChange(
-                          withThinkingLevel(
-                            model,
-                            level,
-                            checked === true ? null : undefined,
-                          ),
-                        )
+      }
+      rows={THINKING_LEVELS.length}
+    >
+      <TableBody>
+        {THINKING_LEVELS.map((level) => {
+          const label = t(`settings.providers.thinkingLevels.${level}`);
+          const isOverridden = map !== undefined && level in map;
+          const stored = baseline.thinkingLevelMap?.[level];
+          return (
+            <TableRow className="hover:bg-transparent" key={level}>
+              <TableCell className="text-muted-foreground text-xs">
+                {label}
+              </TableCell>
+              <TableCell className="p-1">
+                <div className="flex justify-center">
+                  <Checkbox
+                    aria-label={label}
+                    checked={isOverridden}
+                    onCheckedChange={(checked) =>
+                      onChange(
+                        withThinkingLevel(
+                          model,
+                          level,
+                          checked === true ? null : undefined,
+                        ),
+                      )
+                    }
+                  />
+                </div>
+              </TableCell>
+              <TableCell className="p-1">
+                <Input
+                  aria-label={t("settings.providers.thinkingLevelValue", {
+                    level: label,
+                  })}
+                  className="h-7"
+                  disabled={!isOverridden}
+                  onChange={(event) =>
+                    onChange(
+                      withThinkingLevel(
+                        model,
+                        level,
+                        event.target.value === "" ? null : event.target.value,
+                      ),
+                    )
+                  }
+                  value={map?.[level] ?? ""}
+                />
+              </TableCell>
+              <TableCell className="p-1">
+                <div className="flex justify-center">
+                  {map?.[level] !== stored && (
+                    <RevertButton
+                      onRevert={() =>
+                        onChange(withThinkingLevel(model, level, stored))
                       }
                     />
-                  </div>
-                </TableCell>
-                <TableCell className="p-1">
-                  <div className="flex items-center gap-1.5">
-                    {map?.[level] !== baseline.thinkingLevelMap?.[level] && (
-                      <RevertButton
-                        onRevert={() =>
-                          onChange(
-                            withThinkingLevel(
-                              model,
-                              level,
-                              baseline.thinkingLevelMap?.[level],
-                            ),
-                          )
-                        }
-                      />
-                    )}
-                    <Input
-                      aria-label={t("settings.providers.thinkingLevelValue", {
-                        level: label,
-                      })}
-                      className="h-7"
-                      disabled={!isOverridden}
-                      onChange={(event) =>
-                        onChange(
-                          withThinkingLevel(
-                            model,
-                            level,
-                            event.target.value === ""
-                              ? null
-                              : event.target.value,
-                          ),
-                        )
-                      }
-                      value={map?.[level] ?? ""}
-                    />
-                  </div>
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </div>
+                  )}
+                </div>
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </DataTablePanel>
   );
 }

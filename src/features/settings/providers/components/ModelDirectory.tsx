@@ -1,14 +1,11 @@
-import { MoreVertical, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ModelEntry, Protocol } from "@/types/ipc";
 
 import { BulkActionBar } from "@/components/common/BulkActionBar";
-import {
-  DataTablePanel,
-  STICKY_TABLE_HEADER,
-} from "@/components/common/DataTablePanel";
+import { DataTablePanel } from "@/components/common/DataTablePanel";
 import { FacetedFilter } from "@/components/common/FacetedFilter";
 import { useRowSelection } from "@/components/common/use-row-selection";
 import { Button } from "@/components/ui/button";
@@ -17,23 +14,24 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { isComposing } from "@/lib/keyboard";
 
 import type { ModelErrors } from "../draft";
 import type { ModelDraftRow } from "../model-draft";
 
 import { protocolFamilySchema } from "../../schemas/compat";
+import { modelEditorState } from "../model-draft";
 import {
   BLANK_MODEL_ENTRY,
   hasFieldError,
@@ -44,6 +42,36 @@ import {
 
 const FAMILIES = protocolFamilySchema.options;
 
+// One width for all three protocol columns. Their headers are abbreviated
+// ("Msg", "Chat", "Res"), so the longest of them sets the width and the three
+// stay evenly spaced.
+const PROTOCOL_COLUMN = "w-16";
+
+/** One width for the two action columns: two CJK glyphs plus the cell pad. */
+const ACTION_COLUMN = "w-12";
+
+/** The request name's column: an id is long and is read whole. */
+const MODEL_ID_COLUMN = "w-60";
+
+/** The chosen name's column. */
+const MODEL_NAME_COLUMN = "w-44";
+
+const COLUMNS = [
+  "w-10",
+  MODEL_ID_COLUMN,
+  MODEL_NAME_COLUMN,
+  ...FAMILIES.map(() => PROTOCOL_COLUMN),
+  ACTION_COLUMN,
+  ACTION_COLUMN,
+];
+
+/**
+ * The sum of the column widths above. Below it the table scrolls sideways
+ * instead of squeezing the two name columns, which are the ones that would
+ * lose their content first.
+ */
+const MIN_WIDTH = 744;
+
 interface ModelDirectoryProps {
   /** The provider's default protocol: a new row pre-checks it. */
   api: Protocol;
@@ -52,7 +80,7 @@ interface ModelDirectoryProps {
   modelRows: ModelDraftRow[];
   onModelsChange: (rows: ModelDraftRow[]) => void;
   /** Opens the per-model editor on one row of the stored order. */
-  onOpenModel: (index: number) => void;
+  onOpenModel: (key: string) => void;
 }
 
 // The upstream manifest of one provider: the rows are what a save submits, in
@@ -109,15 +137,17 @@ export function ModelDirectory({
   }, [modelRows, prune]);
 
   function handleAdd(): void {
+    const key = crypto.randomUUID();
     onModelsChange([
       ...modelRows,
       {
         baseline: undefined,
-        key: crypto.randomUUID(),
+        editor: modelEditorState(BLANK_MODEL_ENTRY),
+        key,
         model: { ...BLANK_MODEL_ENTRY, apis: [api] },
       },
     ]);
-    onOpenModel(models.length);
+    onOpenModel(key);
   }
 
   function handleRemove(index: number): void {
@@ -210,14 +240,12 @@ export function ModelDirectory({
           {t("settings.providers.addModel")}
         </Button>
       </div>
-      <DataTablePanel>
-        <Table
-          className="table-fixed"
-          containerClassName="h-full overflow-y-auto"
-        >
-          <TableHeader className={STICKY_TABLE_HEADER}>
+      <DataTablePanel
+        columns={COLUMNS}
+        header={
+          <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-10">
+              <TableHead>
                 <span className="sr-only">{t("common.selectAll")}</span>
                 <div className="flex justify-center">
                   <Checkbox
@@ -235,117 +263,135 @@ export function ModelDirectory({
                   />
                 </div>
               </TableHead>
+              {/* The request name first: it is what the row is stored and
+                  requested under, so it is the column a reader scans. The
+                  chosen name follows it as a column of its own rather than as
+                  a caption under it — two names stacked in one cell read as
+                  one name with a subtitle, not as two things to compare. */}
+              <TableHead>{t("settings.providers.modelId")}</TableHead>
               <TableHead>{t("settings.providers.modelName")}</TableHead>
               {FAMILIES.map((family) => (
-                <TableHead className="w-[76px] text-center" key={family}>
-                  {t(`settings.providers.protocolsShort.${family}`)}
+                <TableHead className="text-center" key={family}>
+                  {t(`settings.providers.protocolsAbbr.${family}`)}
                 </TableHead>
               ))}
-              {/* Centre on the row's buttons: the column's header and its
-                  controls share one vertical line. */}
-              <TableHead className="w-16 text-center">
-                {t("common.actions")}
+              {/* Editing and removing get a column each: sharing one column
+                  puts a destructive click one small gap away from the click
+                  that opens the row. */}
+              <TableHead className="text-center">
+                {t("settings.providers.editColumn")}
+              </TableHead>
+              <TableHead className="text-center">
+                {t("settings.providers.removeColumn")}
               </TableHead>
             </TableRow>
           </TableHeader>
-          <TableBody>
-            {rows.map(({ index, key, model }) => {
-              const label =
-                model.id === ""
-                  ? t("settings.providers.modelUntitled")
-                  : model.id;
-              return (
-                <TableRow
-                  data-state={
-                    selection.isSelected(key) ? "selected" : undefined
-                  }
-                  key={key}
-                >
-                  <TableCell className="p-1">
+        }
+        minWidth={MIN_WIDTH}
+      >
+        <TableBody>
+          {rows.map(({ index, key, model }) => {
+            const label =
+              model.id === ""
+                ? t("settings.providers.modelUntitled")
+                : model.id;
+            return (
+              <TableRow
+                data-state={selection.isSelected(key) ? "selected" : undefined}
+                key={key}
+              >
+                <TableCell className="p-1">
+                  <div className="flex justify-center">
+                    <Checkbox
+                      aria-label={label}
+                      checked={selection.isSelected(key)}
+                      onCheckedChange={() => selection.toggle(key)}
+                    />
+                  </div>
+                </TableCell>
+                <TableCell className="min-w-0">
+                  <span
+                    aria-invalid={hasFieldError(errors?.[index]) || undefined}
+                    className={
+                      hasFieldError(errors?.[index])
+                        ? "text-destructive block w-full truncate font-mono text-xs"
+                        : "text-muted-foreground block w-full truncate font-mono text-xs"
+                    }
+                  >
+                    {label}
+                  </span>
+                </TableCell>
+                <TableCell className="min-w-0">
+                  <InlineTextCell
+                    ariaLabel={`${t("settings.providers.modelName")} · ${label}`}
+                    onCommit={(text) =>
+                      handleReplace(
+                        index,
+                        withModelValue(model, "name", optionalText(text)),
+                      )
+                    }
+                    value={model.name ?? ""}
+                  />
+                </TableCell>
+                {FAMILIES.map((family) => (
+                  <TableCell key={family}>
                     <div className="flex justify-center">
                       <Checkbox
-                        aria-label={label}
-                        checked={selection.isSelected(key)}
-                        onCheckedChange={() => selection.toggle(key)}
+                        aria-label={`${t(`settings.providers.protocolsShort.${family}`)} · ${model.id === "" ? t("settings.providers.modelUntitled") : model.id}`}
+                        checked={(model.apis ?? []).includes(family)}
+                        onCheckedChange={() => handleToggle(index, family)}
                       />
                     </div>
                   </TableCell>
-                  <TableCell className="min-w-0">
-                    {/* The name is the row's heading and the request name rides
-                      under it: the request name is what the upstream is
-                      called and never what the user chose to see, so it is
-                      the caption rather than the label. */}
-                    <div className="flex min-w-0 flex-col">
-                      <InlineTextCell
-                        ariaLabel={`${t("settings.providers.modelName")} · ${label}`}
-                        onCommit={(text) =>
-                          handleReplace(
-                            index,
-                            withModelValue(model, "name", optionalText(text)),
-                          )
-                        }
-                        value={model.name ?? ""}
-                      />
-                      <span
-                        aria-invalid={
-                          hasFieldError(errors?.[index]) || undefined
-                        }
-                        className={
-                          hasFieldError(errors?.[index])
-                            ? "text-destructive block w-full truncate font-mono text-xs"
-                            : "text-muted-foreground block w-full truncate font-mono text-xs"
-                        }
-                      >
-                        {label}
-                      </span>
-                    </div>
-                  </TableCell>
-                  {FAMILIES.map((family) => (
-                    <TableCell className="w-[76px]" key={family}>
-                      <div className="flex justify-center">
-                        <Checkbox
-                          aria-label={`${t(`settings.providers.protocolsShort.${family}`)} · ${model.id === "" ? t("settings.providers.modelUntitled") : model.id}`}
-                          checked={(model.apis ?? []).includes(family)}
-                          onCheckedChange={() => handleToggle(index, family)}
-                        />
-                      </div>
-                    </TableCell>
-                  ))}
-                  <TableCell className="w-16">
-                    <div className="flex items-center justify-center">
-                      <Button
-                        aria-label={t("settings.providers.editModel", {
-                          model: label,
-                        })}
-                        onClick={() => onOpenModel(index)}
-                        size="icon-xs"
-                        type="button"
-                        variant="ghost"
-                      >
-                        <Pencil className="size-3.5" />
-                      </Button>
-                      <RowMenu onRemove={() => handleRemove(index)} />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-            {rows.length === 0 && (
-              <TableRow className="hover:bg-transparent">
-                <TableCell
-                  className="text-muted-foreground py-4 text-center text-sm"
-                  colSpan={FAMILIES.length + 4}
-                >
-                  {t(
-                    models.length === 0
-                      ? "settings.providers.modelsEmpty"
-                      : "settings.providers.modelsNoResults",
-                  )}
+                ))}
+                <TableCell>
+                  <div className="flex justify-center">
+                    <IconButton
+                      aria-label={t("settings.providers.editModel", {
+                        model: label,
+                      })}
+                      onClick={() => onOpenModel(key)}
+                      size="icon-xs"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <Pencil className="size-3.5" />
+                    </IconButton>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="flex justify-center">
+                    <IconButton
+                      aria-label={t("settings.providers.removeModelRow", {
+                        model: label,
+                      })}
+                      onClick={() => handleRemove(index)}
+                      size="icon-xs"
+                      type="button"
+                      variant="destructive"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </IconButton>
+                  </div>
                 </TableCell>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
+            );
+          })}
+          {rows.length === 0 && (
+            <TableRow className="hover:bg-transparent">
+              <TableCell
+                className="text-muted-foreground py-4 text-center text-sm"
+                colSpan={FAMILIES.length + 5}
+              >
+                {t(
+                  models.length === 0
+                    ? "settings.providers.modelsEmpty"
+                    : "settings.providers.modelsNoResults",
+                )}
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
       </DataTablePanel>
       <BulkActionBar count={selection.count} onClear={selection.clear}>
         <DropdownMenu>
@@ -453,6 +499,7 @@ function InlineTextCell({
       }}
       onChange={(event) => setDraft(event.target.value)}
       onKeyDown={(event) => {
+        if (isComposing(event.nativeEvent)) return;
         if (event.key === "Enter") {
           event.preventDefault();
           // The pending state and the re-keyed row drop this input on commit;
@@ -467,31 +514,6 @@ function InlineTextCell({
       }}
       value={draft}
     />
-  );
-}
-
-// The row's overflow actions; opening the row's editor has a button of its own.
-function RowMenu({ onRemove }: { onRemove: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          aria-label={t("settings.providers.modelActions")}
-          size="icon-xs"
-          type="button"
-          variant="ghost"
-        >
-          <MoreVertical className="size-3.5" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onSelect={onRemove} variant="destructive">
-          <Trash2 className="size-3.5" />
-          {t("settings.providers.removeModel")}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 

@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import {
   afterEach,
@@ -78,13 +80,20 @@ const GATEWAY: Provider = {
   streamIdleTimeoutMs: 120_000,
 };
 
-const OFFLINE: Provider = {
+const SECOND: Provider = {
   ...GATEWAY,
-  enabled: false,
   id: "p2",
   models: [
     { apis: ["anthropic-messages"], id: "claude-sonnet", reasoning: true },
   ],
+  name: "Second",
+};
+
+/** A switched-off provider: reachable nowhere, so absent from the catalogue. */
+const OFFLINE: Provider = {
+  ...SECOND,
+  enabled: false,
+  id: "p4",
   name: "Offline",
 };
 
@@ -184,10 +193,154 @@ async function renderPage(
 }
 
 describe("aggregate model list", () => {
-  it("groups the rows under the provider they belong to", async () => {
-    await renderPage([GATEWAY, OFFLINE], 3);
+  it("clears a model's inherited switch edit after a round trip", async () => {
+    await renderPage([GATEWAY], 2);
+    fireEvent.click(screen.getByRole("button", { name: "Edit GPT-4o" }));
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Compatibility" }), {
+      button: 0,
+    });
+    const control = screen.getAllByRole("switch")[0];
+    if (control === undefined) throw new Error("Missing compat switch");
+    fireEvent.click(control);
+    expect(screen.getByRole("button", { name: "Save" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    fireEvent.click(control);
+    expect(screen.getByRole("button", { name: "Save" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Restore the saved value" }),
+    ).toBeNull();
+  });
 
-    expect(groupNames()).toEqual(["Gateway2 models", "Offline1 model"]);
+  it("guards invalid model JSON and retains it while changing tabs", async () => {
+    await renderPage([GATEWAY], 2);
+    fireEvent.click(screen.getByRole("button", { name: "Edit GPT-4o" }));
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Compatibility" }), {
+      button: 0,
+    });
+    const input = screen.getByRole("textbox", { name: /priority/i });
+    fireEvent.change(input, { target: { value: "oops" } });
+    fireEvent.blur(input);
+    expect(screen.getByRole("button", { name: "Save" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Identity" }), {
+      button: 0,
+    });
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Compatibility" }), {
+      button: 0,
+    });
+    expect(screen.getByRole("textbox", { name: /priority/i })).toHaveProperty(
+      "value",
+      "oops",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(await screen.findByRole("alertdialog")).toBeTruthy();
+  });
+
+  it("restores only model compatibility to its inherited provider values", async () => {
+    const provider: Provider = {
+      ...GATEWAY,
+      compat: { "openai-completions": { vllmPriority: 3 } },
+      models: (GATEWAY.models ?? []).map((model) => ({
+        ...model,
+        compat: { "openai-completions": { vllmPriority: 7 } },
+      })),
+    };
+    await renderPage([provider], 2);
+    resolveCompatMock.mockImplementation(({ provider: draft }) =>
+      Promise.resolve({
+        sources: { vllmPriority: "provider" },
+        values: {
+          vllmPriority: draft.compat?.["openai-completions"]?.vllmPriority ?? 0,
+        },
+      }),
+    );
+    vi.mocked(updateProvider).mockImplementation(({ id, provider: draft }) =>
+      Promise.resolve({ ...draft, id }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit GPT-4o" }));
+    expect(
+      screen.queryByRole("button", { name: "Restore inherited settings" }),
+    ).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: "Display name" }), {
+      target: { value: "Edited model" },
+    });
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Compatibility" }), {
+      button: 0,
+    });
+    const input = screen.getByRole("textbox", { name: /priority/i });
+    fireEvent.change(input, { target: { value: "oops" } });
+    fireEvent.blur(input);
+    const priority = screen.getByRole("group", { name: /priority/i });
+    expect(
+      within(priority).getAllByRole("button", { name: /^Restore/ }),
+    ).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Save" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    const restore = screen.getByRole("button", {
+      name: "Restore inherited settings",
+    });
+    await waitFor(() => expect(restore).toHaveProperty("disabled", false));
+    fireEvent.click(restore);
+    expect(screen.getByRole("textbox", { name: /priority/i })).toHaveProperty(
+      "value",
+      "3",
+    );
+    expect(screen.queryByText("Invalid JSON")).toBeNull();
+    expect(restore).toHaveProperty("disabled", true);
+    expect(vi.mocked(updateProvider)).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateProvider).toHaveBeenCalledTimes(1));
+    const submitted = vi.mocked(updateProvider).mock.calls[0]?.[0].provider;
+    expect(submitted?.compat).toEqual(provider.compat);
+    expect(submitted?.models?.[0]).toEqual({
+      ...GATEWAY.models?.[0],
+      name: "Edited model",
+    });
+    expect(submitted?.models?.[1]).toEqual(provider.models?.[1]);
+  });
+
+  it("reports and retries a failed compatibility preview", async () => {
+    await renderPage([GATEWAY], 2);
+    resolveCompatMock.mockRejectedValue(new Error("preview failed"));
+    fireEvent.click(screen.getByRole("button", { name: "Edit GPT-4o" }));
+    expect(
+      await screen.findByText(
+        "Could not resolve compatibility settings. Check the input and retry.",
+      ),
+    ).toBeTruthy();
+    resolveCompatMock.mockResolvedValue({ sources: {}, values: {} });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByText(
+          "Could not resolve compatibility settings. Check the input and retry.",
+        ),
+      ).toBeNull(),
+    );
+  });
+
+  it("groups the rows under the provider they belong to", async () => {
+    await renderPage([GATEWAY, SECOND], 3);
+
+    expect(groupNames()).toEqual(["Gateway2 models", "Second1 model"]);
+  });
+
+  it("leaves the models of a switched-off provider out", async () => {
+    await renderPage([GATEWAY, OFFLINE], 2);
+
+    // A disabled provider answers nothing, so its models are not part of the
+    // catalogue: the list's question is what a request can be sent to.
+    expect(groupNames()).toEqual(["Gateway2 models"]);
+    expect(screen.queryByRole("button", { name: "Provider" })).toBeTruthy();
   });
 
   it("carries the request name under the name the model is read by", async () => {
@@ -202,16 +355,8 @@ describe("aggregate model list", () => {
     await renderPage([GATEWAY], 2);
 
     const rows = modelRows();
-    expect(rows[0]?.[2]).toBe("CompletionsResponses");
+    expect(rows[0]?.[2]).toBe("ChatRes");
     expect(rows[1]?.[2]).toBe("No protocol");
-  });
-
-  it("reports reachability from the provider's own switch", async () => {
-    await renderPage([GATEWAY, OFFLINE], 3);
-
-    const rows = modelRows();
-    expect(rows[0]?.[4]).toBe("Available");
-    expect(rows[2]?.[4]).toBe("Unavailable");
   });
 
   it("skips a corrupted provider instead of inventing a row for it", async () => {
@@ -233,6 +378,16 @@ describe("aggregate model list", () => {
 });
 
 describe("aggregate model list pricing", () => {
+  it("opens price details from keyboard focus and closes them with Escape", async () => {
+    await renderPage([PRICED], 1);
+    const trigger = screen.getByRole("button", { name: /Usage-based/ });
+    expect(trigger).toHaveProperty("tabIndex", 0);
+    act(() => trigger.focus());
+    expect(await screen.findByRole("tooltip")).toBeTruthy();
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
+  });
+
   it("names how a model is billed and keeps the rates on a hover", async () => {
     await renderPage([PRICED], 1);
 
@@ -250,14 +405,14 @@ describe("aggregate model list pricing", () => {
 
 describe("aggregate model list filters", () => {
   it("narrows the list by the search box and counts what is left", async () => {
-    await renderPage([GATEWAY, OFFLINE], 3);
+    await renderPage([GATEWAY, SECOND], 3);
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), {
       target: { value: "claude" },
     });
 
     expect(modelRows()).toHaveLength(1);
-    expect(groupNames()).toEqual(["Offline1 model"]);
+    expect(groupNames()).toEqual(["Second1 model"]);
     expect(screen.getAllByText("1 model").length).toBeGreaterThan(0);
   });
 
@@ -279,12 +434,12 @@ describe("aggregate model list filters", () => {
   });
 
   it("narrows the list to the selected providers", async () => {
-    await renderPage([GATEWAY, OFFLINE], 3);
+    await renderPage([GATEWAY, SECOND], 3);
 
-    fireEvent.click(screen.getByRole("button", { name: "Filter by provider" }));
-    fireEvent.click(await screen.findByRole("checkbox", { name: "Offline" }));
+    fireEvent.click(screen.getByRole("button", { name: "Provider" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Second" }));
 
-    expect(groupNames()).toEqual(["Offline1 model"]);
+    expect(groupNames()).toEqual(["Second1 model"]);
     expect(modelRows()).toHaveLength(1);
   });
 });
@@ -295,11 +450,11 @@ it("keeps failed deletions selected and reports which provider failed", async ()
       ? Promise.reject(new Error("fixture failure"))
       : Promise.resolve({ ...provider, id }),
   );
-  await renderPage([GATEWAY, OFFLINE], 3);
+  await renderPage([GATEWAY, SECOND], 3);
   fireEvent.click(screen.getByRole("checkbox", { name: "GPT-4o" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "claude-sonnet" }));
   fireEvent.click(screen.getByRole("button", { name: "Remove model" }));
-  expect(await screen.findByText(/Could not delete: Offline/)).toBeTruthy();
+  expect(await screen.findByText(/Could not delete: Second/)).toBeTruthy();
   expect(screen.getByRole("toolbar").textContent).toContain("1 selected");
   expect(
     screen
@@ -320,15 +475,17 @@ it("protects a floating model draft on close and can revert one field", async ()
     target: { value: "Unsaved" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
-  expect(screen.getByRole("textbox", { name: "Display name" })).toHaveProperty(
-    "value",
-    "Unsaved",
-  );
+
+  // The guard is a modal dialog, so Radix marks the panel behind it
+  // `aria-hidden` and the field has to be read through that.
+  const displayName = (): HTMLElement =>
+    screen.getByRole("textbox", { hidden: true, name: "Display name" });
+  expect(displayName()).toHaveProperty("value", "Unsaved");
   fireEvent.click(
-    screen.getByRole("button", { name: "Restore the saved value" }),
+    screen.getByRole("button", {
+      hidden: true,
+      name: "Restore the saved value",
+    }),
   );
-  expect(screen.getByRole("textbox", { name: "Display name" })).toHaveProperty(
-    "value",
-    "GPT-4o",
-  );
+  expect(displayName()).toHaveProperty("value", "GPT-4o");
 });

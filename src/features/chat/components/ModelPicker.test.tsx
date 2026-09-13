@@ -154,16 +154,4 @@ describe("model picker", () => {
     expect(screen.queryByText("alpha-fast")).toBeNull();
     expect(screen.getByText("No matching models")).toBeTruthy();
   });
-
-  it("offers a way to speak to no model in particular", async () => {
-    const { onPick } = await renderPicker(
-      { kind: "provider", modelId: "alpha-fast", providerId: "p1" },
-      "Alpha Fast",
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Pick a model" }));
-    fireEvent.click(await screen.findByRole("button", { name: "No model" }));
-
-    expect(onPick).toHaveBeenCalledWith(null);
-  });
 });

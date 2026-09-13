@@ -23,6 +23,12 @@ interface FacetedFilterOption {
 interface FacetedFilterProps {
   onChange: (values: string[]) => void;
   options: FacetedFilterOption[];
+  /**
+   * Whether the trigger spells out the picked labels or only how many there
+   * are. A trigger that grows with its selection pushes whatever shares its
+   * line, so a filter inside a narrow panel counts instead.
+   */
+  selectionDisplay?: "count" | "labels";
   /** The filter's name, on the trigger and over the option list. */
   title: string;
   values: string[];
@@ -44,12 +50,14 @@ const PANEL_SEARCH =
 
 // A multi-select filter for a toolbar: the trigger names the field, and the
 // selections it carries are badges on the trigger itself, so a filtered list
-// says what narrowed it without opening anything. The panel filters its own
-// options, because a facet with more than a handful of values is unreadable
-// as a plain list.
+// says what narrowed it without opening anything. A trigger with little room
+// to grow counts the selections instead of naming them. The panel filters its
+// own options, because a facet with more than a handful of values is
+// unreadable as a plain list.
 export function FacetedFilter({
   onChange,
   options,
+  selectionDisplay = "labels",
   title,
   values,
 }: FacetedFilterProps) {
@@ -70,6 +78,8 @@ export function FacetedFilter({
   const selectedLabels = options
     .filter((option) => selected.has(option.value))
     .map((option) => option.label);
+  const showsCount =
+    selectionDisplay === "count" || selectedLabels.length > MAX_SHOWN_LABELS;
 
   function toggle(value: string): void {
     const next = new Set(selected);
@@ -98,9 +108,9 @@ export function FacetedFilter({
                 aria-hidden="true"
                 className="bg-border mx-0.5 h-4 w-px shrink-0"
               />
-              {selectedLabels.length > MAX_SHOWN_LABELS ? (
-                <Badge className="px-1" variant="secondary">
-                  {t("common.selectedCount", { count: selectedLabels.length })}
+              {showsCount ? (
+                <Badge className="px-1 tabular-nums" variant="secondary">
+                  {selectedLabels.length}
                 </Badge>
               ) : (
                 selectedLabels.map((label) => (
@@ -132,9 +142,12 @@ export function FacetedFilter({
           </div>
         </div>
         <div className="max-h-64 overflow-y-auto p-1">
+          {/* bg-accent on hover, never bg-muted: inside a popover the muted
+              token is the panel's own colour, so a muted hover shows nothing
+              in dark mode. */}
           {visible.map((option) => (
             <label
-              className="hover:bg-muted flex h-7 min-w-0 cursor-default items-center gap-2 rounded-[4px] px-1.5 text-sm select-none"
+              className="hover:bg-accent flex h-7 min-w-0 cursor-default items-center gap-2 rounded-[4px] px-1.5 text-sm select-none"
               key={option.value}
             >
               <Checkbox

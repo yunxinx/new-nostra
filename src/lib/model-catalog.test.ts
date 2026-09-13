@@ -9,7 +9,7 @@ import {
   modelDisplayName,
   type ModelListFilter,
   unifiedCandidateRows,
-  unifiedMemberLabel,
+  unifiedMemberParts,
 } from "./model-catalog";
 
 /** A stored provider row with the fields every row carries. */
@@ -146,7 +146,7 @@ describe("unifiedCandidateRows", () => {
   });
 });
 
-describe("unifiedMemberLabel", () => {
+describe("unifiedMemberParts", () => {
   it("shows the provider name and the model display name", () => {
     const providers: ProviderListItem[] = [
       provider({
@@ -156,13 +156,13 @@ describe("unifiedMemberLabel", () => {
       }),
     ];
     expect(
-      unifiedMemberLabel({ model: "m1", providerId: "p1" }, providers),
-    ).toBe("Alpha / Fast");
+      unifiedMemberParts({ model: "m1", providerId: "p1" }, providers),
+    ).toEqual({ model: "Fast", provider: "Alpha" });
   });
 
   it("falls back to the stored ids when the provider or model is gone", () => {
-    expect(unifiedMemberLabel({ model: "gone", providerId: "p9" }, [])).toBe(
-      "p9 / gone",
+    expect(unifiedMemberParts({ model: "gone", providerId: "p9" }, [])).toEqual(
+      { model: "gone", provider: "p9" },
     );
   });
 });

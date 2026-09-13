@@ -27,7 +27,7 @@ export interface CompatFieldDescriptor {
 export type ProtocolFamily = z.infer<typeof protocolFamilySchema>;
 
 /** Control a compat field is edited with, decided by the field's schema type. */
-type CompatControlKind = "json" | "map" | "select" | "switch";
+type CompatControlKind = "json" | "list" | "map" | "select" | "switch";
 
 // The three compat structs are the single source of truth for the field set,
 // the control kind and the select options: a field added there reaches the
@@ -99,7 +99,11 @@ function descriptorsOf(
   return descriptors;
 }
 
-/** The control kind of a field: booleans switch, enums and literals select. */
+/**
+ * The control kind of a field: booleans switch, enums and literals select,
+ * arrays take the multiline editor a list of objects needs, records the
+ * key/value table, and the remaining JSON types the single-line box.
+ */
 function kindOf(base: z.ZodType): CompatControlKind {
   if (base instanceof z.ZodBoolean) {
     return "switch";
@@ -110,8 +114,11 @@ function kindOf(base: z.ZodType): CompatControlKind {
   if (base instanceof z.ZodRecord) {
     return "map";
   }
-  // Arrays, numbers and whatever a future field adds: the JSON editor parses
-  // the text and validates it against this field's own schema.
+  if (base instanceof z.ZodArray) {
+    return "list";
+  }
+  // Numbers and whatever a future field adds: the JSON editor parses the text
+  // and validates it against this field's own schema.
   return "json";
 }
 

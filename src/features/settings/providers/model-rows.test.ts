@@ -5,9 +5,9 @@ import type { ModelCost, ModelEntry } from "@/types/ipc";
 import {
   addModelRow,
   BLANK_MODEL_ENTRY,
-  type CostDraft,
-  costDraft,
-  costFromDraft,
+  costFromRules,
+  type CostRuleDraft,
+  costRules,
   hasFieldError,
   optionalNumber,
   optionalText,
@@ -30,6 +30,16 @@ const MODEL: ModelEntry = {
   input: ["text"],
   reasoning: true,
 };
+
+/** Four blank rate texts, as a new price row opens. */
+function blankRates(): {
+  cacheRead: string;
+  cacheWrite: string;
+  input: string;
+  output: string;
+} {
+  return { cacheRead: "", cacheWrite: "", input: "", output: "" };
+}
 
 const PRICED: ModelCost = {
   cacheRead: 0.05,
@@ -122,18 +132,23 @@ describe("model row field edits", () => {
   });
 });
 
-describe("cost drafts", () => {
-  it("opens blank when the row carries no price list", () => {
-    expect(costFromDraft(costDraft(undefined))).toBeUndefined();
+describe("cost rules", () => {
+  it("opens as the base row when the model carries no price list", () => {
+    expect(costRules(undefined)).toEqual([
+      { kind: "base", rates: blankRates() },
+    ]);
+    expect(costFromRules(costRules(undefined))).toBeUndefined();
   });
 
   it("round trips a stored price list", () => {
-    expect(costFromDraft(costDraft(PRICED))).toEqual(PRICED);
+    expect(costFromRules(costRules(PRICED))).toEqual(PRICED);
   });
 
   it("reads blank rates as zero once any rate is filled", () => {
-    const draft = { ...costDraft(undefined), input: "0.5" };
-    expect(costFromDraft(draft)).toEqual({
+    const rules: CostRuleDraft[] = [
+      { kind: "base", rates: { ...blankRates(), input: "0.5" } },
+    ];
+    expect(costFromRules(rules)).toEqual({
       cacheRead: 0,
       cacheWrite: 0,
       input: 0.5,
@@ -141,20 +156,20 @@ describe("cost drafts", () => {
     });
   });
 
-  it("keeps a tier block alive on its zero threshold for the schema", () => {
-    const draft: CostDraft = {
-      ...costDraft(undefined),
-      tiers: [
-        {
-          cacheRead: "",
-          cacheWrite: "",
-          input: "",
-          inputTokensAbove: "",
-          output: "",
-        },
-      ],
-    };
-    expect(costFromDraft(draft)).toEqual({
+  it("keeps the base row first and the peak row last", () => {
+    expect(costRules(PRICED).map((rule) => rule.kind)).toEqual([
+      "base",
+      "tier",
+      "peak",
+    ]);
+  });
+
+  it("keeps a tier alive on its zero threshold for the schema", () => {
+    const rules: CostRuleDraft[] = [
+      { kind: "base", rates: blankRates() },
+      { above: "", kind: "tier", rates: { ...blankRates(), output: "2" } },
+    ];
+    expect(costFromRules(rules)).toEqual({
       cacheRead: 0,
       cacheWrite: 0,
       input: 0,
@@ -165,27 +180,25 @@ describe("cost drafts", () => {
           cacheWrite: 0,
           input: 0,
           inputTokensAbove: 0,
-          output: 0,
+          output: 2,
         },
       ],
     });
   });
 
   it("drops an empty day list and keeps start and end verbatim", () => {
-    const draft: CostDraft = {
-      ...costDraft(undefined),
-      peak: {
-        cacheRead: "1",
-        cacheWrite: "2",
-        input: "3",
-        output: "4",
+    const rules: CostRuleDraft[] = [
+      { kind: "base", rates: blankRates() },
+      {
+        kind: "peak",
+        rates: { cacheRead: "1", cacheWrite: "2", input: "3", output: "4" },
         windows: [
           { days: [], end: "04:00", start: "01:00" },
           { days: ["sat", "sun"], end: "02:00", start: "23:00" },
         ],
       },
-    };
-    expect(costFromDraft(draft)?.peak).toEqual({
+    ];
+    expect(costFromRules(rules)?.peak).toEqual({
       cacheRead: 1,
       cacheWrite: 2,
       input: 3,

@@ -11,6 +11,14 @@ export interface AggregateRow {
   provider: Provider;
 }
 
+/** The two parts one member of a unified model is shown as. */
+export interface MemberParts {
+  /** The model's display name, or its request name. */
+  model: string;
+  /** The provider's name, or its id. */
+  provider: string;
+}
+
 /** Filters of the aggregate list. */
 export interface ModelListFilter {
   /** Protocol families; an empty list lets every protocol through. */
@@ -115,16 +123,22 @@ export function unifiedCandidateRows(
   return aggregateRows(providers).filter((row) => row.provider.enabled);
 }
 
-/** The display text of a member: provider name and model, ids as fallbacks. */
-export function unifiedMemberLabel(
+/**
+ * The display parts of one member: the provider it pins and the model it
+ * names, each falling back to its stored id. A member is shown as two things
+ * — the model, and a badge naming whose it is — so the parts come apart
+ * rather than arriving pre-joined into one string.
+ */
+export function unifiedMemberParts(
   member: UnifiedMember,
   providers: ProviderListItem[],
-): string {
+): MemberParts {
   const provider = providerById(providers, member.providerId);
   const model = provider?.models?.find((entry) => entry.id === member.model);
-  return `${provider === undefined ? member.providerId : provider.name} / ${
-    model === undefined ? member.model : modelDisplayName(model)
-  }`;
+  return {
+    model: model === undefined ? member.model : modelDisplayName(model),
+    provider: provider === undefined ? member.providerId : provider.name,
+  };
 }
 
 /** Whether a list item decodes as a provider, not its corrupted placeholder. */

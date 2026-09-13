@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -23,6 +24,7 @@ import type {
   Provider,
   ProviderListItem,
   ProviderPreset,
+  ResolvedCompat,
 } from "@/types/ipc";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -149,8 +151,13 @@ function keyField(): HTMLElement {
   return screen.getByLabelText("API key");
 }
 
+/**
+ * The name box, read with `hidden: true`: the dirty guard is a modal dialog,
+ * and while it is up Radix marks the page behind it `aria-hidden`, so the
+ * default query would not see the field it is asking about.
+ */
 function nameField(): HTMLElement {
-  return screen.getByRole("textbox", { name: "Name" });
+  return screen.getByRole("textbox", { hidden: true, name: "Name" });
 }
 
 /** Drills into one model of the open provider's directory. */
@@ -167,17 +174,6 @@ function openSection(name: string): void {
   fireEvent.mouseDown(screen.getByRole("tab", { name }), { button: 0 });
 }
 
-/** Picks an entry of one model row's action menu. */
-async function pickModelAction(row: number, name: string): Promise<void> {
-  const triggers = screen.getAllByRole("button", { name: "Model actions" });
-  fireEvent.pointerDown(triggers[row] ?? document.body, {
-    button: 0,
-    ctrlKey: false,
-  });
-  const item = await screen.findByRole("menuitem", { name });
-  fireEvent.pointerUp(item);
-}
-
 async function pickNewMenuItem(name: string): Promise<void> {
   fireEvent.pointerDown(screen.getByRole("button", { name: "Add provider" }), {
     button: 0,
@@ -185,6 +181,12 @@ async function pickNewMenuItem(name: string): Promise<void> {
   });
   const item = await screen.findByRole("menuitem", { name });
   fireEvent.pointerUp(item);
+}
+
+/** Removes one model row outright: the action is a button, not a menu item. */
+function removeModelRow(row: number): void {
+  const buttons = screen.getAllByRole("button", { name: /^Remove model / });
+  fireEvent.click(buttons[row] ?? document.body);
 }
 
 async function renderPage(
@@ -234,10 +236,9 @@ describe("provider detail prefill", () => {
     expect(
       screen.getByRole("combobox", { name: "Default protocol" }).textContent,
     ).toContain("OpenAI Chat Completions");
-    expect(screen.getByRole("textbox", { name: "Header name" })).toHaveProperty(
-      "value",
-      "x-extra",
-    );
+    expect(
+      screen.getByRole("textbox", { name: "Custom headers Header name" }),
+    ).toHaveProperty("value", "x-extra");
   });
 
   it("selects a row from the keyboard", async () => {
@@ -523,7 +524,7 @@ describe("model directory on the provider page", () => {
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Pricing" }), {
       button: 0,
     });
-    fireEvent.click(screen.getByRole("switch", { name: "Peak pricing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add peak rates" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Start (UTC) 1" }), {
       target: { value: "9:00" },
     });
@@ -543,12 +544,12 @@ describe("model directory on the provider page", () => {
     });
     clickRow("Second");
 
-    // The guard parks the switch and the edited row stays on screen.
-    expect(screen.getByRole("status")).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "Model ID" })).toHaveProperty(
-      "value",
-      "m9",
-    );
+    // The guard parks the switch and the edited row stays on screen, behind
+    // the modal that Radix marks the rest of the page `aria-hidden` for.
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(
+      screen.getByRole("textbox", { hidden: true, name: "Model ID" }),
+    ).toHaveProperty("value", "m9");
 
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
     expect(nameField()).toHaveProperty("value", "Second");
@@ -634,7 +635,7 @@ describe("provider detail sections", () => {
     clickRow("Gateway");
     openSection("Models");
 
-    await pickModelAction(0, "Remove model");
+    removeModelRow(0);
 
     expect(screen.getByText("No models yet")).toBeTruthy();
   });
@@ -648,17 +649,17 @@ describe("dirty guard", () => {
 
     clickRow("Second");
     expect(nameField()).toHaveProperty("value", "Edited");
-    expect(screen.getByRole("status")).toBeTruthy();
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
 
     // Cancelling leaves the draft untouched and the guard disappears.
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(nameField()).toHaveProperty("value", "Edited");
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
 
     clickRow("Second");
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
     expect(nameField()).toHaveProperty("value", "Second");
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
   it("is clean again after the dirty guard discarded the draft", async () => {
@@ -676,7 +677,7 @@ describe("dirty guard", () => {
       true,
     );
     clickRow("Gateway");
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(nameField()).toHaveProperty("value", "Gateway");
   });
 
@@ -758,7 +759,7 @@ describe("dirty guard", () => {
       { id, provider: { ...storedDraft, enabled: false } },
       expect.anything(),
     );
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 });
 
@@ -820,6 +821,127 @@ describe("corrupted rows", () => {
 });
 
 describe("draft actions", () => {
+  it("clears an inherited switch edit after toggling it on and off", async () => {
+    const provider = { ...STORED };
+    delete provider.compat;
+    await renderPage([provider], "Gateway");
+    clickRow("Gateway");
+    openSection("Advanced");
+    const control = within(screen.getByRole("tabpanel")).getAllByRole(
+      "switch",
+    )[0];
+    if (control === undefined) throw new Error("Missing compat switch");
+    expect(control.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(control);
+    expect(screen.getByRole("button", { name: "Reset" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    fireEvent.click(control);
+    expect(screen.getByRole("button", { name: "Reset" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Restore the saved value" }),
+    ).toBeNull();
+  });
+
+  it("keeps invalid input typed while a save is pending", async () => {
+    let finishSave = () => undefined;
+    updateProviderMock.mockImplementation(
+      ({ id, provider }) =>
+        new Promise<Provider>((resolve) => {
+          finishSave = () => {
+            const saved = { ...provider, id };
+            rows = [saved];
+            resolve(saved);
+          };
+        }),
+    );
+    await renderPage(
+      [{ ...STORED, compat: { "openai-completions": { vllmPriority: 7 } } }],
+      "Gateway",
+    );
+    clickRow("Gateway");
+    fireEvent.change(nameField(), { target: { value: "Renamed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateProviderMock).toHaveBeenCalledTimes(1));
+    openSection("Advanced");
+    fireEvent.change(screen.getByRole("textbox", { name: /priority/i }), {
+      target: { value: "oops" },
+    });
+    await act(async () => {
+      finishSave();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save" })).toBeTruthy(),
+    );
+    expect(screen.getByRole("textbox", { name: /priority/i })).toHaveProperty(
+      "value",
+      "oops",
+    );
+    expect(screen.getByRole("button", { name: "Reset" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(screen.getByRole("textbox", { name: /priority/i })).toHaveProperty(
+      "value",
+      "7",
+    );
+    openSection("General");
+    expect(nameField()).toHaveProperty("value", "Renamed");
+  });
+
+  it("guards invalid JSON through tab switches, save, navigation, and reset", async () => {
+    await renderPage(
+      [
+        { ...STORED, compat: { "openai-completions": { vllmPriority: 7 } } },
+        OTHER,
+      ],
+      "Gateway",
+    );
+    clickRow("Gateway");
+    openSection("Advanced");
+    const input = screen.getByRole("textbox", { name: /priority/i });
+    fireEvent.change(input, { target: { value: "oops" } });
+    fireEvent.blur(input);
+    expect(screen.getByRole("button", { name: "Reset" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(updateProviderMock).not.toHaveBeenCalled();
+
+    openSection("General");
+    openSection("Advanced");
+    expect(screen.getByRole("textbox", { name: /priority/i })).toHaveProperty(
+      "value",
+      "oops",
+    );
+    clickRow("Second");
+    expect(await screen.findByRole("alertdialog")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("textbox", { name: /priority/i })).toHaveProperty(
+      "value",
+      "oops",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(screen.getByRole("textbox", { name: /priority/i })).toHaveProperty(
+      "value",
+      "7",
+    );
+    expect(screen.getByRole("button", { name: "Reset" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    clickRow("Second");
+    expect(nameField()).toHaveProperty("value", "Second");
+  });
+
   it("restores the stored values when the draft is reset", async () => {
     await renderPage([STORED], "Gateway");
     clickRow("Gateway");
@@ -917,10 +1039,9 @@ describe("preset prefill", () => {
     expect(
       screen.getByRole("combobox", { name: "Default protocol" }).textContent,
     ).toContain("OpenAI Chat Completions");
-    expect(screen.getByRole("textbox", { name: "Header name" })).toHaveProperty(
-      "value",
-      "X-OpenRouter-Title",
-    );
+    expect(
+      screen.getByRole("textbox", { name: "Custom headers Header name" }),
+    ).toHaveProperty("value", "X-OpenRouter-Title");
     openModel("anthropic/claude-sonnet-5");
     expect(screen.getByRole("textbox", { name: "Model ID" })).toHaveProperty(
       "value",
@@ -931,9 +1052,7 @@ describe("preset prefill", () => {
       true,
     );
 
-    // The preset's compat arrives as this provider's own overrides, one
-    // segment per checked family in the strip above the pane; the overridden
-    // field offers restore.
+    // Preset values are saved overrides, so untouched fields offer no undo.
     openSection("Advanced");
     const completionsSegment = screen.getByRole("radio", {
       name: "Completions",
@@ -952,8 +1071,8 @@ describe("preset prefill", () => {
     expect(
       within(
         within(completions).getByRole("group", { name: "Developer role" }),
-      ).getByRole("button", { name: "Restore default" }),
-    ).toBeTruthy();
+      ).queryByRole("button", { name: /^Restore/ }),
+    ).toBeNull();
 
     fireEvent.click(messagesSegment);
 
@@ -989,6 +1108,275 @@ describe("preset prefill", () => {
       expect(createProviderMock).toHaveBeenCalledTimes(1);
     });
     expect(nameField()).toHaveProperty("value", "OpenRouter");
+  });
+});
+
+describe("provider compatibility defaults", () => {
+  const official: Provider = {
+    ...STORED,
+    baseUrl: "https://api.openai.com/v1",
+    compat: {
+      "anthropic-messages": { supportsTemperature: false },
+      "openai-completions": {
+        supportsDeveloperRole: true,
+        supportsStore: false,
+        vllmPriority: 7,
+      },
+      "openai-responses": { supportsStrictMode: false },
+    },
+    models: [
+      {
+        apis: ["openai-completions"],
+        compat: { "openai-completions": { vllmPriority: 9 } },
+        id: "m1",
+        reasoning: true,
+      },
+    ],
+  };
+  const defaults: Record<string, ResolvedCompat> = {
+    "anthropic-messages": {
+      presetId: "openai",
+      sources: { supportsTemperature: "familyDefault" },
+      values: { supportsTemperature: true },
+    },
+    "openai-completions": {
+      presetId: "openai",
+      sources: {
+        supportsDeveloperRole: "vendor",
+        supportsStore: "vendor",
+        vllmPriority: "vendor",
+      },
+      values: {
+        supportsDeveloperRole: true,
+        supportsStore: true,
+        vllmPriority: 3,
+      },
+    },
+    "openai-responses": {
+      presetId: "openai",
+      sources: { supportsStrictMode: "familyDefault" },
+      values: { supportsStrictMode: true },
+    },
+  };
+
+  beforeEach(() => {
+    resolveCompatMock.mockImplementation(({ protocol, provider }) =>
+      Promise.resolve(
+        provider.baseUrl === official.baseUrl ||
+          provider.baseUrl === "https://api.openai.com/v2"
+          ? (defaults[protocol] ?? { sources: {}, values: {} })
+          : { sources: {}, values: {} },
+      ),
+    );
+  });
+
+  it("shows one footer action immediately before Reset only on a recognized provider's Advanced tab", async () => {
+    await renderPage([official, OTHER], "Gateway");
+    clickRow("Gateway");
+    expect(
+      screen.queryByRole("button", { name: "Restore default" }),
+    ).toBeNull();
+    openSection("Models");
+    expect(
+      screen.queryByRole("button", { name: "Restore default" }),
+    ).toBeNull();
+    openSection("Advanced");
+    const restore = await screen.findByRole("button", {
+      name: "Restore default",
+    });
+    expect(
+      screen.getAllByRole("button", { name: "Restore default" }),
+    ).toHaveLength(1);
+    expect(
+      screen.getByRole("button", { name: "Reset" }).previousElementSibling,
+    ).toBe(restore);
+    expect(
+      within(screen.getByRole("tabpanel")).queryByRole("button", {
+        name: "Restore default",
+      }),
+    ).toBeNull();
+    clickRow("Second");
+    openSection("Advanced");
+    await waitFor(() =>
+      expect(
+        resolveCompatMock.mock.calls.map(([params]) => params.provider.baseUrl),
+      ).toContain(OTHER.baseUrl),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Restore default" }),
+    ).toBeNull();
+  });
+
+  it("restores only provider compatibility, clears invalid text, and saves the other draft edits intact", async () => {
+    updateProviderMock.mockImplementation(({ id, provider }) =>
+      Promise.resolve({ ...provider, id }),
+    );
+    await renderPage([official], "Gateway");
+    clickRow("Gateway");
+    fireEvent.change(nameField(), { target: { value: "Renamed" } });
+    fireEvent.change(keyField(), { target: { value: "sk-edited" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Base URL" }), {
+      target: { value: "https://api.openai.com/v2" },
+    });
+    openModel("m1");
+    fireEvent.change(screen.getByRole("textbox", { name: "Display name" }), {
+      target: { value: "Edited model" },
+    });
+    openSection("Advanced");
+    const priority = screen.getByRole("textbox", { name: /priority/i });
+    fireEvent.change(priority, { target: { value: "oops" } });
+    fireEvent.blur(priority);
+    expect(screen.getByRole("button", { name: "Save" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    const restore = await screen.findByRole("button", {
+      name: "Restore default",
+    });
+    await waitFor(() => expect(restore).toHaveProperty("disabled", false));
+    fireEvent.click(restore);
+    expect(screen.getByRole("textbox", { name: /priority/i })).toHaveProperty(
+      "value",
+      "3",
+    );
+    expect(screen.queryByText("Invalid JSON")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    expect(restore).toHaveProperty("disabled", true);
+    expect(updateProviderMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateProviderMock).toHaveBeenCalledTimes(1));
+    const { id, ...saved } = official;
+    expect(updateProviderMock.mock.calls[0]?.[0]).toEqual({
+      id,
+      provider: {
+        ...saved,
+        apiKey: "sk-edited",
+        baseUrl: "https://api.openai.com/v2",
+        compat: { "openai-completions": { supportsDeveloperRole: true } },
+        models: official.models?.map((model) => ({
+          ...model,
+          name: "Edited model",
+        })),
+        name: "Renamed",
+      },
+    });
+  });
+
+  it("keeps restore-default changes reversible to the saved baseline", async () => {
+    await renderPage([official], "Gateway");
+    clickRow("Gateway");
+    openSection("Advanced");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Restore default" }),
+    );
+    expect(screen.getByRole("textbox", { name: /priority/i })).toHaveProperty(
+      "value",
+      "3",
+    );
+    const store = screen.getByRole("group", { name: "Store parameter" });
+    expect(
+      within(store).getAllByRole("button", { name: /^Restore/ }),
+    ).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(screen.getByRole("textbox", { name: /priority/i })).toHaveProperty(
+      "value",
+      "7",
+    );
+    expect(screen.getByRole("button", { name: "Reset" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Restore the saved value" }),
+    ).toBeNull();
+    expect(updateProviderMock).not.toHaveBeenCalled();
+  });
+
+  it("clears invalid input without dirtying saved values already at the default", async () => {
+    await renderPage(
+      [
+        {
+          ...official,
+          compat: {
+            "openai-completions": { supportsStore: true, vllmPriority: 3 },
+          },
+        },
+      ],
+      "Gateway",
+    );
+    clickRow("Gateway");
+    openSection("Advanced");
+    const restore = await screen.findByRole("button", {
+      name: "Restore default",
+    });
+    expect(restore).toHaveProperty("disabled", true);
+    fireEvent.change(screen.getByRole("textbox", { name: /priority/i }), {
+      target: { value: "oops" },
+    });
+    expect(restore).toHaveProperty("disabled", false);
+    fireEvent.click(restore);
+    expect(screen.getByRole("textbox", { name: /priority/i })).toHaveProperty(
+      "value",
+      "3",
+    );
+    expect(screen.getByRole("button", { name: "Reset" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Restore the saved value" }),
+    ).toBeNull();
+  });
+
+  it("waits for the changed URL's defaults before allowing restore", async () => {
+    await renderPage([official], "Gateway");
+    clickRow("Gateway");
+    openSection("Advanced");
+    const restore = await screen.findByRole("button", {
+      name: "Restore default",
+    });
+    expect(restore).toHaveProperty("disabled", false);
+    let finishResolution: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => {
+      finishResolution = resolve;
+    });
+    resolveCompatMock.mockImplementation(async () => {
+      await pending;
+      return {
+        presetId: "moonshot",
+        sources: { vllmPriority: "vendor" },
+        values: { vllmPriority: 11 },
+      };
+    });
+    openSection("General");
+    fireEvent.change(screen.getByRole("textbox", { name: "Base URL" }), {
+      target: { value: "https://api.moonshot.ai/v1" },
+    });
+    openSection("Advanced");
+    const pendingRestore = screen.getByRole("button", {
+      name: "Restore default",
+    });
+    expect(pendingRestore).toHaveProperty("disabled", true);
+    fireEvent.click(pendingRestore);
+    expect(screen.getByRole("textbox", { name: /priority/i })).toHaveProperty(
+      "value",
+      "7",
+    );
+    await act(async () => {
+      finishResolution();
+      await pending;
+    });
+    await waitFor(() =>
+      expect(pendingRestore).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(pendingRestore);
+    expect(screen.getByRole("textbox", { name: /priority/i })).toHaveProperty(
+      "value",
+      "11",
+    );
   });
 });
 

@@ -4,6 +4,7 @@ import { useForm, type UseFormReturn, useWatch } from "react-hook-form";
 
 import type {
   AppError,
+  CompatBuckets,
   ModelEntry,
   Provider,
   ProviderDraft,
@@ -12,8 +13,13 @@ import type {
 
 import { useUpdateProvider } from "@/hooks/use-providers";
 import { isDeepEqual } from "@/lib/deep-equal";
-import { changedValueCount, mergeSavedFields } from "@/lib/draft-values";
+import { mergeSavedFields } from "@/lib/draft-values";
 
+import {
+  changedCompatCount,
+  type CompatInputDrafts,
+  hasInvalidCompatInputs,
+} from "../components/compat/compat-draft";
 import { storedBuckets } from "../components/compat/compat-values";
 import { providerDraftSchema } from "../schemas/provider";
 import {
@@ -26,7 +32,13 @@ import {
   toFormValues,
   toProviderDraft,
 } from "./draft";
-import { type ModelDraftRow, modelDraftRows } from "./model-draft";
+import {
+  changedModelCount,
+  type ModelDraftRow,
+  modelDraftRows,
+  type ModelEditorState,
+  rebaseModelEditor,
+} from "./model-draft";
 
 export interface ProviderDraftController {
   adoptCreated: (provider: Provider) => void;
@@ -36,20 +48,26 @@ export interface ProviderDraftController {
   baselineFor: (id: string) => null | ProviderDraft;
   changedCount: number;
   changedFields: ReadonlySet<ProviderDraftField>;
+  compatInputs: CompatInputDrafts;
   discard: () => void;
   error: AppError | null;
   form: UseFormReturn<ProviderFormValues, unknown, ProviderFormSubmission>;
+  hasInvalidInputs: boolean;
   isChanged: boolean;
   isKeyRevealed: boolean;
   isSaving: boolean;
   modelRows: ModelDraftRow[];
   models: ModelEntry[];
+  restoreCompat: (compat: CompatBuckets | undefined) => void;
   revertField: (field: ProviderDraftField) => void;
   revision: number;
   save: () => void;
   select: (id: string) => void;
   target: ProviderTarget;
   toggleKeyReveal: () => void;
+  updateCompatInputs: (inputs: CompatInputDrafts) => void;
+  updateModel: (key: string, model: ModelEntry) => void;
+  updateModelEditor: (key: string, editor: ModelEditorState) => void;
   updateModelRows: (rows: ModelDraftRow[]) => void;
 }
 
@@ -61,6 +79,7 @@ export type ProviderTarget =
 interface EditorState {
   baseline: ProviderDraft;
   baselineRows: ModelDraftRow[];
+  compatInputs: CompatInputDrafts;
   modelRows: ModelDraftRow[];
   revision: number;
   target: ProviderTarget;
@@ -75,6 +94,7 @@ export function useProviderDraft(
   const [state, setState] = useState<EditorState>({
     baseline: BLANK_PROVIDER_DRAFT,
     baselineRows: [],
+    compatInputs: {},
     modelRows: [],
     revision: 0,
     target: { kind: "none" },
@@ -89,14 +109,23 @@ export function useProviderDraft(
     control: form.control,
   });
   const models = state.modelRows.map((row) => row.model);
-  const changedFields = changedDraftFields(state.baseline, models, values);
+  const changedFields = new Set(
+    changedDraftFields(state.baseline, models, values),
+  );
+  const invalidProviderInputs = hasInvalidCompatInputs(state.compatInputs);
+  const invalidModelInputs = state.modelRows.some((row) =>
+    hasInvalidCompatInputs(row.editor.compatInputs),
+  );
+  if (invalidProviderInputs) changedFields.add("compat");
+  if (invalidModelInputs) changedFields.add("models");
+  const hasInvalidInputs = invalidProviderInputs || invalidModelInputs;
   const modelChangedCount =
     state.modelRows.reduce(
       (count, row) =>
         count +
         (row.baseline === undefined
           ? 1
-          : changedValueCount(row.baseline, row.model)),
+          : changedModelCount(row.baseline, row.model, row.editor)),
       0,
     ) +
     state.baselineRows.filter(
@@ -107,17 +136,25 @@ export function useProviderDraft(
     if (field === "compat")
       return (
         count +
-        changedValueCount(state.baseline.compat, storedBuckets(values.compat))
+        changedCompatCount(
+          state.baseline.compat,
+          storedBuckets(values.compat),
+          state.compatInputs,
+        )
       );
     return count + 1;
   }, 0);
 
-  function resetTo(target: ProviderTarget, baseline: ProviderDraft): void {
+  function resetTo(
+    target: ProviderTarget,
+    baseline: ProviderDraft,
+    modelRows = modelDraftRows(baseline.models ?? []),
+  ): void {
     generation.current += 1;
-    const modelRows = modelDraftRows(baseline.models ?? []);
     setState((previous) => ({
       baseline,
       baselineRows: modelRows,
+      compatInputs: {},
       modelRows,
       revision: previous.revision + 1,
       target,
@@ -134,6 +171,32 @@ export function useProviderDraft(
       modelRows.map((row) => row.model),
       { shouldDirty: true, shouldValidate: form.formState.isSubmitted },
     );
+  }
+
+  function updateModel(key: string, model: ModelEntry): void {
+    setState((previous) => ({
+      ...previous,
+      modelRows: previous.modelRows.map((row) =>
+        row.key === key ? { ...row, model } : row,
+      ),
+    }));
+    form.setValue(
+      "models",
+      state.modelRows.map((row) => (row.key === key ? model : row.model)),
+      {
+        shouldDirty: true,
+        shouldValidate: form.formState.isSubmitted,
+      },
+    );
+  }
+
+  function updateModelEditor(key: string, editor: ModelEditorState): void {
+    setState((previous) => ({
+      ...previous,
+      modelRows: previous.modelRows.map((row) =>
+        row.key === key ? { ...row, editor } : row,
+      ),
+    }));
   }
 
   function select(id: string): void {
@@ -156,7 +219,7 @@ export function useProviderDraft(
   }
 
   function discard(): void {
-    resetTo(state.target, state.baseline);
+    resetTo(state.target, state.baseline, state.baselineRows);
   }
 
   function revertField(field: ProviderDraftField): void {
@@ -167,7 +230,24 @@ export function useProviderDraft(
       shouldValidate: form.formState.isSubmitted,
     });
     // Stateful text editors must read the restored value while section navigation stays mounted.
-    setState((previous) => ({ ...previous, revision: previous.revision + 1 }));
+    setState((previous) => ({
+      ...previous,
+      compatInputs: field === "compat" ? {} : previous.compatInputs,
+      revision: previous.revision + 1,
+    }));
+  }
+
+  function restoreCompat(compat: CompatBuckets | undefined): void {
+    if (isSubmitting.current) return;
+    form.setValue("compat", compat ?? null, {
+      shouldDirty: true,
+      shouldValidate: form.formState.isSubmitted,
+    });
+    setState((previous) => ({
+      ...previous,
+      compatInputs: {},
+      revision: previous.revision + 1,
+    }));
   }
 
   function baselineFor(id: string): null | ProviderDraft {
@@ -186,7 +266,12 @@ export function useProviderDraft(
   }
 
   function save(): void {
-    if (isSubmitting.current || state.target.kind !== "edit") return;
+    if (
+      isSubmitting.current ||
+      state.target.kind !== "edit" ||
+      hasInvalidInputs
+    )
+      return;
     isSubmitting.current = true;
     const submittedGeneration = generation.current;
     const submittedValues = form.getValues();
@@ -224,11 +309,29 @@ export function useProviderDraft(
               const model = savedByKey.get(row.key);
               return model === undefined
                 ? []
-                : [{ baseline: model, key: row.key, model }];
+                : [
+                    {
+                      baseline: model,
+                      editor: {
+                        ...rebaseModelEditor(row.editor, row.editor, model),
+                        compatInputs: {},
+                      },
+                      key: row.key,
+                      model,
+                    },
+                  ];
             }),
             modelRows: previous.modelRows.map((row) => ({
               ...row,
               baseline: savedByKey.get(row.key),
+              editor: savedByKey.has(row.key)
+                ? rebaseModelEditor(
+                    row.editor,
+                    submittedRows.find((submitted) => submitted.key === row.key)
+                      ?.editor ?? row.editor,
+                    savedByKey.get(row.key) ?? row.model,
+                  )
+                : row.editor,
               model: isDeepEqual(
                 previous.modelRows.map((item) => item.model),
                 models,
@@ -260,20 +363,27 @@ export function useProviderDraft(
     baselineFor,
     changedCount,
     changedFields,
+    compatInputs: state.compatInputs,
     discard,
     error: update.error,
     form,
+    hasInvalidInputs,
     isChanged: changedFields.size > 0,
     isKeyRevealed,
     isSaving: update.isPending,
     modelRows: state.modelRows,
     models,
+    restoreCompat,
     revertField,
     revision: state.revision,
     save,
     select,
     target: state.target,
     toggleKeyReveal: () => setIsKeyRevealed((value) => !value),
+    updateCompatInputs: (compatInputs) =>
+      setState((previous) => ({ ...previous, compatInputs })),
+    updateModel,
+    updateModelEditor,
     updateModelRows,
   };
 }

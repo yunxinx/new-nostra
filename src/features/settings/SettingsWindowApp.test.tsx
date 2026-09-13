@@ -123,8 +123,13 @@ function modelListMarker(): HTMLElement | null {
   return screen.queryByRole("searchbox", { name: "Search" });
 }
 
+/**
+ * The name box, read with `hidden: true`: the dirty guard is a modal dialog,
+ * and while it is up Radix marks the page behind it `aria-hidden`, so the
+ * default query would not see the field it is asking about.
+ */
 function nameField(): HTMLElement {
-  return screen.getByRole("textbox", { name: "Name" });
+  return screen.getByRole("textbox", { hidden: true, name: "Name" });
 }
 
 async function openProviders(): Promise<void> {
@@ -237,7 +242,7 @@ describe("navigation away from the provider draft", () => {
     clickNav("Model list");
 
     // The switch is held on the page that owns the draft, which stays usable.
-    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(await screen.findByRole("alertdialog")).toBeTruthy();
     expect(nameField()).toHaveProperty("value", "Edited");
     expect(modelListMarker()).toBeNull();
 
@@ -254,10 +259,10 @@ describe("navigation away from the provider draft", () => {
     fireEvent.change(nameField(), { target: { value: "Edited" } });
 
     clickNav("Model list");
-    await screen.findByRole("status");
+    await screen.findByRole("alertdialog");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(providersMarker()).toBeTruthy();
     expect(nameField()).toHaveProperty("value", "Edited");
 
@@ -276,30 +281,28 @@ describe("navigation away from the provider draft", () => {
     clickNav("Model list");
 
     await screen.findByRole("searchbox", { name: "Search" });
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
-  it("lets a newer in-page action replace the parked switch", async () => {
+  it("keeps the parked in-page action when the guard is cancelled", async () => {
     renderWindow();
     await openProviders();
     fireEvent.click(screen.getByRole("button", { name: "Upstream" }));
     fireEvent.change(nameField(), { target: { value: "Edited" } });
 
-    // A row action parks first; the switch then takes the notice over.
+    // A row action parks first: the guard is up over the page.
     fireEvent.click(screen.getByRole("button", { name: "Upstream" }));
-    clickNav("Model list");
-    await screen.findByRole("status");
+    await screen.findByRole("alertdialog");
 
-    // Cancelling the switch brings the earlier blocked action back.
+    // Cancelling it leaves the draft and the page as they were, so the same
+    // action can be taken again — or dropped by discarding the draft.
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.getByRole("status")).toBeTruthy();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(nameField()).toHaveProperty("value", "Edited");
 
-    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
-
-    // The confirmed action is the row re-selection: the page stays and the
-    // draft is back on the stored document.
-    expect(nameField()).toHaveProperty("value", "Upstream");
-    expect(modelListMarker()).toBeNull();
-    expect(screen.queryByRole("status")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    clickNav("Model list");
+    await screen.findByRole("searchbox", { name: "Search" });
+    expect(providersMarker()).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProviderDraft, ResolvedCompat } from "@/types/ipc";
@@ -47,6 +47,7 @@ async function settle(): Promise<void> {
 }
 
 afterEach(() => {
+  cleanup();
   vi.resetAllMocks();
 });
 
@@ -59,9 +60,9 @@ describe("compat resolution", () => {
     const { result } = renderHook(() => useCompatResolution(families, input));
 
     await waitFor(() => {
-      expect(result.current["openai-completions"]).toBeDefined();
+      expect(result.current.data["openai-completions"]).toBeDefined();
     });
-    expect(result.current["anthropic-messages"]).toEqual(RESOLUTION);
+    expect(result.current.data["anthropic-messages"]).toEqual(RESOLUTION);
     expect(resolveCompatMock).toHaveBeenCalledTimes(2);
     expect(resolveCompatMock).toHaveBeenCalledWith({
       protocol: "anthropic-messages",
@@ -94,6 +95,30 @@ describe("compat resolution", () => {
     );
   });
 
+  it("marks previous defaults as loading as soon as the URL changes", async () => {
+    const next: ResolvedCompat = {
+      presetId: "anthropic",
+      sources: {},
+      values: {},
+    };
+    resolveCompatMock
+      .mockResolvedValueOnce({ ...RESOLUTION, presetId: "openai" })
+      .mockResolvedValue(next);
+    const { rerender, result } = renderHook(
+      ({ input }: { input: CompatResolutionInput }) =>
+        useCompatResolution(["openai-completions"], input),
+      { initialProps: { input: inputWith("https://api.openai.com/v1") } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    rerender({ input: inputWith("https://api.anthropic.com") });
+    expect(result.current.isLoading).toBe(true);
+    expect(resolveCompatMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.data["openai-completions"]).toEqual(next);
+    });
+  });
+
   it("keeps the newest run's resolution when an older run lands late", async () => {
     const late: { resolve: (value: ResolvedCompat) => void } = {
       resolve: () => undefined,
@@ -124,7 +149,7 @@ describe("compat resolution", () => {
     rerender({ input: inputWith("https://b.example") });
     await settle();
     await waitFor(() => {
-      expect(result.current["openai-completions"]).toEqual(RESOLUTION);
+      expect(result.current.data["openai-completions"]).toEqual(RESOLUTION);
     });
 
     // The first run's result arrives after the newer one: it must not
@@ -135,6 +160,52 @@ describe("compat resolution", () => {
         setTimeout(resolve, 0);
       });
     });
-    expect(result.current["openai-completions"]).toEqual(RESOLUTION);
+    expect(result.current.data["openai-completions"]).toEqual(RESOLUTION);
+  });
+
+  it("clears stale values after failure and retries without changing the draft", async () => {
+    resolveCompatMock
+      .mockResolvedValueOnce(RESOLUTION)
+      .mockRejectedValueOnce(new Error("invalid unsigned integer"))
+      .mockResolvedValue(RESOLUTION);
+    const families = ["openai-completions"] as const;
+    const { rerender, result } = renderHook(
+      ({ input }: { input: CompatResolutionInput }) =>
+        useCompatResolution(families, input),
+      { initialProps: { input: inputWith("https://first.example") } },
+    );
+    await waitFor(() =>
+      expect(result.current.data["openai-completions"]).toEqual(RESOLUTION),
+    );
+    rerender({ input: inputWith("https://second.example") });
+    await settle();
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
+    expect(result.current.data).toEqual({});
+    expect(result.current.isLoading).toBe(false);
+    act(() => result.current.retry());
+    await waitFor(() =>
+      expect(result.current.data["openai-completions"]).toEqual(RESOLUTION),
+    );
+    expect(result.current.error).toBeNull();
+    expect(resolveCompatMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("consumes a rejection after unmount without updating an abandoned editor", async () => {
+    let reject: (error: Error) => void = () => undefined;
+    resolveCompatMock.mockImplementation(
+      () =>
+        new Promise<ResolvedCompat>((_resolve, rejectResult) => {
+          reject = rejectResult;
+        }),
+    );
+    const { unmount } = renderHook(() =>
+      useCompatResolution(["openai-completions"], { provider: DRAFT }),
+    );
+    unmount();
+    await act(async () => {
+      reject(new Error("late failure"));
+      await Promise.resolve();
+    });
+    expect(resolveCompatMock).toHaveBeenCalledTimes(1);
   });
 });

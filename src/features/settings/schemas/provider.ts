@@ -4,12 +4,6 @@ import { compatBucketsSchema, isKnownProtocolFamily } from "./compat";
 import { jsonValueSchema } from "./json";
 import { modelCostSchema } from "./model-cost";
 
-// Provider draft validation, mirroring the DB-free half of the Rust rules
-// (src-tauri/src/provider/config.rs: normalize_base_url, validate_provider,
-// validate_model). Rules that read the stored provider set — provider name
-// uniqueness, unified-name collisions, member registration — stay in the write
-// transaction and are not duplicated here.
-
 /** Largest value a Rust `u32` field accepts. */
 const U32_MAX = 4_294_967_295;
 
