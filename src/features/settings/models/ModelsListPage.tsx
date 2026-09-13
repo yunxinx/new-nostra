@@ -2,13 +2,18 @@ import { IdCard, Pencil, Search, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { ModelEntry, Provider } from "@/types/ipc";
+import type { ModelEntry, Protocol, Provider } from "@/types/ipc";
 
 import { BulkActionBar } from "@/components/common/BulkActionBar";
 import { DataTablePanel } from "@/components/common/DataTablePanel";
-import { FacetedFilter } from "@/components/common/FacetedFilter";
+import {
+  FacetedFilter,
+  type FacetedFilterOption,
+} from "@/components/common/FacetedFilter";
+import { ProtocolIcon } from "@/components/common/ProtocolIcon";
 import { QueryNotice } from "@/components/common/QueryNotice";
 import { useRowSelection } from "@/components/common/use-row-selection";
+import { VendorIcon } from "@/components/common/VendorIcon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -26,7 +31,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useProviders, useUpdateProvider } from "@/hooks/use-providers";
+import {
+  useProviderPresets,
+  useProviders,
+  useUpdateProvider,
+} from "@/hooks/use-providers";
+import { presetIdForBaseUrl, protocolMark } from "@/lib/brand-marks";
 import {
   type AggregateRow,
   aggregateRows,
@@ -73,6 +83,7 @@ export function ModelsListPage({
 }) {
   const { t } = useTranslation();
   const { error, isLoading, providers, retry } = useProviders();
+  const presets = useProviderPresets();
   const batch = useBatchDelete();
   const update = useUpdateProvider();
   const [search, setSearch] = useState("");
@@ -98,21 +109,26 @@ export function ModelsListPage({
   );
   const sections = useMemo(() => sectionRows(filtered), [filtered]);
 
-  const providerOptions = useMemo(() => {
+  const providerOptions = useMemo<FacetedFilterOption[]>(() => {
     const counts = new Map<string, number>();
-    const names = new Map<string, string>();
+    const owners = new Map<string, Provider>();
     for (const row of rows) {
       counts.set(row.provider.id, (counts.get(row.provider.id) ?? 0) + 1);
-      names.set(row.provider.id, row.provider.name);
+      owners.set(row.provider.id, row.provider);
     }
-    return [...names].map(([value, label]) => ({
+    return [...owners].map(([value, provider]) => ({
       count: counts.get(value) ?? 0,
-      label,
+      icon: (
+        <VendorIcon
+          presetId={presetIdForBaseUrl(provider.baseUrl, presets.presets)}
+        />
+      ),
+      label: provider.name,
       value,
     }));
-  }, [rows]);
+  }, [presets.presets, rows]);
 
-  const protocolOptions = useMemo(() => {
+  const protocolOptions = useMemo<FacetedFilterOption[]>(() => {
     const counts = new Map<string, number>();
     for (const row of rows) {
       for (const api of row.model.apis ?? []) {
@@ -121,6 +137,7 @@ export function ModelsListPage({
     }
     return protocolFamilySchema.options.map((family) => ({
       count: counts.get(family) ?? 0,
+      icon: <ProtocolIcon family={family} />,
       label: t(`settings.providers.protocols.${family}`),
       value: family,
     }));
@@ -371,11 +388,7 @@ function ModelListRow({
         ) : (
           <div className="flex flex-wrap gap-1">
             {(model.apis ?? []).map((family) => (
-              <Badge key={family} variant="outline">
-                {t(`settings.providers.protocolsAbbr.${family}`, {
-                  defaultValue: family,
-                })}
-              </Badge>
+              <ProtocolBadge family={family} key={family} />
             ))}
           </div>
         )}
@@ -478,6 +491,29 @@ function PriceCell({ cost }: { cost: ModelEntry["cost"] }) {
         </TooltipContent>
       </Tooltip>
     </TableCell>
+  );
+}
+
+/**
+ * One protocol a model answers on: the family's mark, then its abbreviation,
+ * both in the family's own colour on a wash of it. The colour is what tells
+ * the two OpenAI families apart, so an unrecognised family keeps the plain
+ * outline badge rather than borrowing a colour that reads as another family.
+ */
+function ProtocolBadge({ family }: { family: Protocol }) {
+  const { t } = useTranslation();
+  const mark = protocolMark(family);
+  const abbr = t(`settings.providers.protocolsAbbr.${family}`, {
+    defaultValue: family,
+  });
+  if (mark === undefined) {
+    return <Badge variant="outline">{abbr}</Badge>;
+  }
+  return (
+    <Badge className={mark.wash} variant="outline">
+      <ProtocolIcon family={family} />
+      {abbr}
+    </Badge>
   );
 }
 

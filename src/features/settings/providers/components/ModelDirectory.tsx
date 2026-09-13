@@ -7,6 +7,7 @@ import type { ModelEntry, Protocol } from "@/types/ipc";
 import { BulkActionBar } from "@/components/common/BulkActionBar";
 import { DataTablePanel } from "@/components/common/DataTablePanel";
 import { FacetedFilter } from "@/components/common/FacetedFilter";
+import { ProtocolIcon } from "@/components/common/ProtocolIcon";
 import { useRowSelection } from "@/components/common/use-row-selection";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -119,6 +120,7 @@ export function ModelDirectory({
       FAMILIES.map((family) => ({
         count: models.filter((model) => (model.apis ?? []).includes(family))
           .length,
+        icon: <ProtocolIcon family={family} />,
         label: t(`settings.providers.protocolsShort.${family}`),
         value: family,
       })),

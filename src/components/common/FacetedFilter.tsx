@@ -1,6 +1,6 @@
 import { cn } from "cn";
 import { Plus, Search, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
@@ -14,8 +14,10 @@ import {
 } from "@/components/ui/popover";
 
 /** One filterable value; the count is the rows carrying it, badges aside. */
-interface FacetedFilterOption {
+export interface FacetedFilterOption {
   count?: number;
+  /** Decoration standing for the value, drawn ahead of the label. */
+  icon?: ReactNode;
   label: string;
   value: string;
 }
@@ -75,11 +77,11 @@ export function FacetedFilter({
     );
   }, [options, query]);
 
-  const selectedLabels = options
-    .filter((option) => selected.has(option.value))
-    .map((option) => option.label);
+  const selectedOptions = options.filter((option) =>
+    selected.has(option.value),
+  );
   const showsCount =
-    selectionDisplay === "count" || selectedLabels.length > MAX_SHOWN_LABELS;
+    selectionDisplay === "count" || selectedOptions.length > MAX_SHOWN_LABELS;
 
   function toggle(value: string): void {
     const next = new Set(selected);
@@ -102,7 +104,7 @@ export function FacetedFilter({
         >
           <Plus className="size-3.5" />
           {title}
-          {selectedLabels.length > 0 && (
+          {selectedOptions.length > 0 && (
             <>
               <span
                 aria-hidden="true"
@@ -110,16 +112,17 @@ export function FacetedFilter({
               />
               {showsCount ? (
                 <Badge className="px-1 tabular-nums" variant="secondary">
-                  {selectedLabels.length}
+                  {selectedOptions.length}
                 </Badge>
               ) : (
-                selectedLabels.map((label) => (
+                selectedOptions.map((option) => (
                   <Badge
                     className="max-w-24 px-1"
-                    key={label}
+                    key={option.value}
                     variant="secondary"
                   >
-                    <span className="truncate">{label}</span>
+                    {option.icon}
+                    <span className="truncate">{option.label}</span>
                   </Badge>
                 ))
               )}
@@ -155,6 +158,7 @@ export function FacetedFilter({
                 checked={selected.has(option.value)}
                 onCheckedChange={() => toggle(option.value)}
               />
+              {option.icon}
               <span className="min-w-0 flex-1 truncate">{option.label}</span>
               {option.count !== undefined && (
                 <span className="text-muted-foreground text-xs tabular-nums">

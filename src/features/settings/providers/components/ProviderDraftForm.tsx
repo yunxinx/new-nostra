@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 
 import type { ProviderDraft } from "@/types/ipc";
 
+import { ProtocolIcon } from "@/components/common/ProtocolIcon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -271,6 +272,7 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
                     <SelectContent>
                       {protocolFamilySchema.options.map((family) => (
                         <SelectItem key={family} value={family}>
+                          <ProtocolIcon family={family} />
                           {t(`settings.providers.protocols.${family}`)}
                         </SelectItem>
                       ))}

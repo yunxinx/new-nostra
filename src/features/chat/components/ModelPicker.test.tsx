@@ -16,16 +16,21 @@ import {
   vi,
 } from "vitest";
 
-import type { Provider } from "@/types/ipc";
+import type { Provider, ProviderPreset } from "@/types/ipc";
 import type { ModelSelection } from "@/types/model-selection";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { initI18n } from "@/lib/i18n";
-import { listProviders, listUnifiedModels } from "@/lib/ipc/providers";
+import {
+  listProviderPresets,
+  listProviders,
+  listUnifiedModels,
+} from "@/lib/ipc/providers";
 
 import { ModelPicker } from "./ModelPicker";
 
 vi.mock("@/lib/ipc/providers", () => ({
+  listProviderPresets: vi.fn(),
   listProviders: vi.fn(),
   listUnifiedModels: vi.fn(),
 }));
@@ -62,6 +67,25 @@ const BETA: Provider = {
   name: "Beta",
 };
 
+/** Stands at OpenAI's own address, so the picker can name its vendor. */
+const VENDORED: Provider = {
+  ...ALPHA,
+  baseUrl: "https://api.openai.com/v1",
+  id: "p3",
+  models: [{ apis: ["openai-responses"], id: "gpt-x", reasoning: false }],
+  name: "OpenAI",
+};
+
+const OPENAI_PRESET: ProviderPreset = {
+  api: "openai-responses",
+  baseUrl: "https://api.openai.com/v1",
+  compat: {},
+  headers: {},
+  models: [],
+  name: "OpenAI",
+  presetId: "openai",
+};
+
 let queryClient: QueryClient;
 
 beforeAll(() => {
@@ -82,6 +106,15 @@ afterEach(() => {
   queryClient.clear();
 });
 
+/** The heading of one provider's group, which is where its mark is drawn. */
+function heading(group: HTMLElement): HTMLElement {
+  const found = group.querySelector("p");
+  if (found === null) {
+    throw new Error("group has no heading");
+  }
+  return found;
+}
+
 /**
  * Renders the picker and waits for the catalogue to land: the trigger names
  * the picked model, so a pick the read has not delivered yet still shows the
@@ -90,8 +123,12 @@ afterEach(() => {
 async function renderPicker(
   model: ModelSelection | null = null,
   settlesTo = "Pick a model",
+  options: { presets?: ProviderPreset[]; providers?: Provider[] } = {},
 ): Promise<{ onPick: ReturnType<typeof vi.fn> }> {
-  listProvidersMock.mockResolvedValue({ providers: [ALPHA, BETA] });
+  listProvidersMock.mockResolvedValue({
+    providers: options.providers ?? [ALPHA, BETA],
+  });
+  vi.mocked(listProviderPresets).mockResolvedValue(options.presets ?? []);
   vi.mocked(listUnifiedModels).mockResolvedValue([]);
   const onPick = vi.fn<(model: ModelSelection | null) => void>();
   render(
@@ -138,6 +175,23 @@ describe("model picker", () => {
       modelId: "alpha-fast",
       providerId: "p1",
     });
+  });
+
+  it("marks a provider whose address is a preset's own", async () => {
+    await renderPicker(null, "Pick a model", {
+      presets: [OPENAI_PRESET],
+      providers: [ALPHA, VENDORED],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Pick a model" }));
+
+    const marked = heading(
+      await screen.findByRole("group", { name: "OpenAI" }),
+    );
+    const plain = heading(screen.getByRole("group", { name: "Alpha" }));
+    expect(marked.querySelector("svg")).not.toBeNull();
+    // A provider at an address no preset claims keeps a plain heading.
+    expect(plain.querySelector("svg")).toBeNull();
   });
 
   it("narrows the list by the search box", async () => {

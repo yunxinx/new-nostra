@@ -113,6 +113,13 @@ export function useDeleteUnifiedModel() {
 }
 
 /**
+ * The empty preset list, held as one value: `?? []` would hand every consumer a
+ * fresh array while the read is pending, and a list that feeds a memo would
+ * then invalidate it on every render.
+ */
+const NO_PRESETS: ProviderPreset[] = [];
+
+/**
  * The built-in vendor presets, read once per session: they are app-version
  * constants, so no write can invalidate them.
  */
@@ -125,7 +132,7 @@ export function useProviderPresets(): ProviderPresetsResult {
   });
   return {
     error: query.error ?? null,
-    presets: query.data ?? [],
+    presets: query.data ?? NO_PRESETS,
     retry: () => void query.refetch(),
   };
 }

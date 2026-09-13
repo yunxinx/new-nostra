@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import type { AppError, ProviderListItem, ProviderPreset } from "@/types/ipc";
 
+import { VendorIcon } from "@/components/common/VendorIcon";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -146,6 +147,7 @@ export function ProviderList({
                           onNewPreset(preset);
                         }}
                       >
+                        <VendorIcon presetId={preset.presetId} />
                         {preset.name}
                       </DropdownMenuItem>
                     ))}

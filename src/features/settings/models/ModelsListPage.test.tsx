@@ -23,6 +23,7 @@ import type { Provider, ProviderListItem } from "@/types/ipc";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { initI18n } from "@/lib/i18n";
 import {
+  listProviderPresets,
   listProviders,
   resolveCompat,
   updateProvider,
@@ -31,11 +32,13 @@ import {
 import { ModelsListPage } from "./ModelsListPage";
 
 vi.mock("@/lib/ipc/providers", () => ({
+  listProviderPresets: vi.fn(),
   listProviders: vi.fn(),
   resolveCompat: vi.fn(),
   updateProvider: vi.fn(),
 }));
 
+const listProviderPresetsMock = vi.mocked(listProviderPresets);
 const listProvidersMock = vi.mocked(listProviders);
 const resolveCompatMock = vi.mocked(resolveCompat);
 
@@ -147,13 +150,23 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Row cells of the rendered table, header row excluded. */
+/**
+ * Row cells of the rendered table, header row excluded. A protocol badge draws
+ * the family's mark, whose own `<title>` is decoration the cell's text should
+ * not be read through, so the titles come off before the text is taken.
+ */
 function bodyRows(): Array<Array<null | string>> {
   return screen
     .getAllByRole("row")
     .slice(1)
     .map((row) =>
-      Array.from(row.querySelectorAll("td")).map((cell) => cell.textContent),
+      Array.from(row.querySelectorAll("td")).map((cell) => {
+        const content = cell.cloneNode(true) as HTMLElement;
+        for (const title of content.querySelectorAll("svg title")) {
+          title.remove();
+        }
+        return content.textContent;
+      }),
     );
 }
 
@@ -179,6 +192,7 @@ async function renderPage(
   models: number,
 ): Promise<void> {
   listProvidersMock.mockResolvedValue({ providers });
+  listProviderPresetsMock.mockResolvedValue([]);
   resolveCompatMock.mockResolvedValue({ sources: {}, values: {} });
   render(
     <QueryClientProvider client={queryClient}>

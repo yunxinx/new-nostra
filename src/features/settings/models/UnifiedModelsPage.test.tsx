@@ -23,6 +23,7 @@ import { initI18n } from "@/lib/i18n";
 import {
   createUnifiedModel,
   deleteUnifiedModel,
+  listProviderPresets,
   listProviders,
   listUnifiedModels,
   updateUnifiedModel,
@@ -33,6 +34,7 @@ import { UnifiedModelsPage } from "./UnifiedModelsPage";
 vi.mock("@/lib/ipc/providers", () => ({
   createUnifiedModel: vi.fn(),
   deleteUnifiedModel: vi.fn(),
+  listProviderPresets: vi.fn(),
   listProviders: vi.fn(),
   listUnifiedModels: vi.fn(),
   updateUnifiedModel: vi.fn(),
@@ -105,6 +107,7 @@ beforeEach(() => {
     defaultOptions: { queries: { retry: false } },
   });
   vi.resetAllMocks();
+  vi.mocked(listProviderPresets).mockResolvedValue([]);
   listProvidersMock.mockResolvedValue({
     providers: [GATEWAY, ANTHROPIC],
   });

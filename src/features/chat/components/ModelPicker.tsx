@@ -4,8 +4,13 @@ import { useTranslation } from "react-i18next";
 
 import type { ModelSelection } from "@/types/model-selection";
 
-import { FacetedFilter } from "@/components/common/FacetedFilter";
+import {
+  FacetedFilter,
+  type FacetedFilterOption,
+} from "@/components/common/FacetedFilter";
+import { ProtocolIcon } from "@/components/common/ProtocolIcon";
 import { QueryNotice } from "@/components/common/QueryNotice";
+import { VendorIcon } from "@/components/common/VendorIcon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,7 +18,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { useProviders, useUnifiedModels } from "@/hooks/use-providers";
+import {
+  useProviderPresets,
+  useProviders,
+  useUnifiedModels,
+} from "@/hooks/use-providers";
+import { presetIdForBaseUrl } from "@/lib/brand-marks";
 import {
   matchesModelFilters,
   modelDisplayName,
@@ -32,6 +42,7 @@ const UNIFIED_GROUP = "unified-models";
 export function ModelPicker({ model, onPick }: ModelPickerProps) {
   const { t } = useTranslation();
   const providers = useProviders();
+  const presets = useProviderPresets();
   const unified = useUnifiedModels();
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -62,26 +73,39 @@ export function ModelPicker({ model, onPick }: ModelPickerProps) {
           row.model.apis?.some((api) => protocols.includes(api)),
         )),
   );
-  const providerOptions = sectionRows(rows).map((section) => ({
-    count: section.rows.length,
-    label: section.provider.name,
-    value: section.provider.id,
-  }));
+  const providerOptions: FacetedFilterOption[] = sectionRows(rows).map(
+    (section) => ({
+      count: section.rows.length,
+      icon: (
+        <VendorIcon
+          presetId={presetIdForBaseUrl(
+            section.provider.baseUrl,
+            presets.presets,
+          )}
+        />
+      ),
+      label: section.provider.name,
+      value: section.provider.id,
+    }),
+  );
   if (aggregates.length > 0)
     providerOptions.push({
       count: aggregates.length,
       label: t("settings.models.unified"),
       value: UNIFIED_GROUP,
     });
-  const protocolOptions = PROTOCOL_FAMILIES.map((family) => ({
-    count:
-      rows.filter((row) => row.model.apis?.includes(family)).length +
-      aggregates.filter(({ members }) =>
-        members.some((row) => row.model.apis?.includes(family)),
-      ).length,
-    label: t(`settings.providers.protocolsShort.${family}`),
-    value: family,
-  }));
+  const protocolOptions: FacetedFilterOption[] = PROTOCOL_FAMILIES.map(
+    (family) => ({
+      count:
+        rows.filter((row) => row.model.apis?.includes(family)).length +
+        aggregates.filter(({ members }) =>
+          members.some((row) => row.model.apis?.includes(family)),
+        ).length,
+      icon: <ProtocolIcon family={family} />,
+      label: t(`settings.providers.protocolsShort.${family}`),
+      value: family,
+    }),
+  );
   const picked =
     model?.kind === "provider"
       ? rows.find(
@@ -172,7 +196,13 @@ export function ModelPicker({ model, onPick }: ModelPickerProps) {
               key={provider.id}
               role="group"
             >
-              <p className="text-muted-foreground px-1.5 py-1 text-xs font-medium">
+              <p className="text-muted-foreground flex items-center gap-1.5 px-1.5 py-1 text-xs font-medium">
+                <VendorIcon
+                  presetId={presetIdForBaseUrl(
+                    provider.baseUrl,
+                    presets.presets,
+                  )}
+                />
                 {provider.name}
               </p>
               {group.map((row) => (

@@ -12,14 +12,21 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
+  Provider,
   ProviderListItem,
+  ProviderPreset,
   UnifiedMember,
   UnifiedModel,
   UnifiedModelDraft,
 } from "@/types/ipc";
 
 import { DataTablePanel } from "@/components/common/DataTablePanel";
-import { FacetedFilter } from "@/components/common/FacetedFilter";
+import {
+  FacetedFilter,
+  type FacetedFilterOption,
+} from "@/components/common/FacetedFilter";
+import { ProtocolIcon } from "@/components/common/ProtocolIcon";
+import { VendorIcon } from "@/components/common/VendorIcon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -34,8 +41,10 @@ import {
 } from "@/components/ui/table";
 import {
   useCreateUnifiedModel,
+  useProviderPresets,
   useUpdateUnifiedModel,
 } from "@/hooks/use-providers";
+import { presetIdForBaseUrl } from "@/lib/brand-marks";
 import { isDeepEqual } from "@/lib/deep-equal";
 import {
   type AggregateRow,
@@ -93,6 +102,7 @@ export function UnifiedModelEditor({
 }: UnifiedModelEditorProps) {
   const { t } = useTranslation();
   const [initial] = useState(initialValue);
+  const presets = useProviderPresets();
   const create = useCreateUnifiedModel();
   const update = useUpdateUnifiedModel();
   const [id, setId] = useState(initial?.id ?? "");
@@ -125,7 +135,7 @@ export function UnifiedModelEditor({
   // provider reads as the same place in both.
   const sections = sectionRows(candidates);
 
-  const providerOptions = providerOptionsOf(allCandidates);
+  const providerOptions = providerOptionsOf(allCandidates, presets.presets);
   const protocolOptions = protocolOptionsOf(allCandidates, t);
 
   function reset(): void {
@@ -674,7 +684,7 @@ function MemberOrderTable({
 function protocolOptionsOf(
   candidates: ReturnType<typeof unifiedCandidateRows>,
   t: (key: string) => string,
-): Array<{ count: number; label: string; value: string }> {
+): FacetedFilterOption[] {
   const counts = new Map<string, number>();
   for (const row of candidates) {
     for (const api of row.model.apis ?? []) {
@@ -683,6 +693,7 @@ function protocolOptionsOf(
   }
   return protocolFamilySchema.options.map((family) => ({
     count: counts.get(family) ?? 0,
+    icon: <ProtocolIcon family={family} />,
     label: t(`settings.providers.protocolsShort.${family}`),
     value: family,
   }));
@@ -691,16 +702,20 @@ function protocolOptionsOf(
 /** One filterable value per provider that offers a candidate. */
 function providerOptionsOf(
   candidates: ReturnType<typeof unifiedCandidateRows>,
-): Array<{ count: number; label: string; value: string }> {
+  presets: ProviderPreset[],
+): FacetedFilterOption[] {
   const counts = new Map<string, number>();
-  const names = new Map<string, string>();
+  const owners = new Map<string, Provider>();
   for (const row of candidates) {
     counts.set(row.provider.id, (counts.get(row.provider.id) ?? 0) + 1);
-    names.set(row.provider.id, row.provider.name);
+    owners.set(row.provider.id, row.provider);
   }
-  return [...names].map(([value, label]) => ({
+  return [...owners].map(([value, provider]) => ({
     count: counts.get(value) ?? 0,
-    label,
+    icon: (
+      <VendorIcon presetId={presetIdForBaseUrl(provider.baseUrl, presets)} />
+    ),
+    label: provider.name,
     value,
   }));
 }
