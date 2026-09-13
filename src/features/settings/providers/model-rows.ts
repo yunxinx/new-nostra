@@ -243,6 +243,7 @@ export function samplingRows(
   params: Record<string, JsonValue> | undefined,
 ): KeyValueRow[] {
   return Object.entries(params ?? {}).map(([key, value]) => ({
+    id: crypto.randomUUID(),
     key,
     value: jsonLiteralText(value),
   }));

@@ -14,14 +14,21 @@ import { CompatSourceBadge } from "./CompatSourceBadge";
 import { CompatSwitchField } from "./CompatSwitchField";
 
 interface CompatFieldProps {
+  /** This field's saved override, read by a map's commit rules. */
+  baseline?: JsonValue | undefined;
   descriptor: CompatFieldDescriptor;
+  /** Effective values of the layers below, merged key by key by a map. */
+  inherited?: JsonValue | undefined;
   input: CompatInputDraft | undefined;
   onCommit: (value: JsonValue | null) => void;
   onInputChange: (input: CompatInputDraft | undefined) => void;
   onRevert?: (() => void) | undefined;
   /** Winning layer of the shown value; absent while the value is unset. */
   source: CompatSource | undefined;
-  /** Shown value: this layer's override, else the merged effective value. */
+  /**
+   * Shown value: this layer's override, else the merged effective value. A map
+   * takes this layer's own map alone — its rows merge `inherited` themselves.
+   */
   value: JsonValue | undefined;
 }
 
@@ -33,7 +40,9 @@ interface CompatFieldProps {
 // heading, so it takes the row whole: wrapping it in a row of its own would
 // put the field's name on the pane twice.
 export function CompatField({
+  baseline,
   descriptor,
+  inherited,
   input,
   onCommit,
   onInputChange,
@@ -54,7 +63,9 @@ export function CompatField({
       <div aria-label={label} role="group">
         <CompatMapField
           actions={actions}
+          baseline={baseline}
           info={info}
+          inherited={inherited}
           label={label}
           onChange={onCommit}
           onRevert={onRevert}

@@ -20,6 +20,10 @@ import { SettingsInfoButton } from "./SettingsInfoButton";
 
 /** One editable pair; a row whose key is still blank stays visible. */
 export interface KeyValueRow {
+  /** Row identity, unchanged by edits and reordering, so inputs keep focus. */
+  id: string;
+  /** The key belongs to the layer below: shown here, not editable. */
+  isInherited?: boolean;
   key: string;
   value: string;
 }
@@ -34,6 +38,12 @@ interface KeyValueEditorProps {
   addLabel: string;
   /** What this map is for, shown over the table. */
   info?: string | undefined;
+  /**
+   * Marks a row whose key the layer below owns: the key reads as text, and the
+   * marker takes the remove button's place, since removing the row here would
+   * only hide a key that stays in force. Rows without the mark keep both.
+   */
+  inheritedLabel?: string | undefined;
   /** Whether the map holds a validation error. */
   isInvalid?: boolean | undefined;
   /** Column header over the key inputs. */
@@ -69,10 +79,15 @@ const MAX_ROWS = 5;
 // the row it would hold back is worth more than the table it announces. The
 // table appears with the first row and is exactly as tall as the rows it
 // holds, up to the height it was designed for.
+//
+// A row is keyed by its own id, never by its position: the map a row belongs
+// to can gain, lose and reorder rows around it, and an input that stayed put
+// through that must keep its focus.
 export function KeyValueEditor({
   actions,
   addLabel,
   info,
+  inheritedLabel,
   isInvalid = false,
   keyLabel,
   label,
@@ -93,7 +108,7 @@ export function KeyValueEditor({
         <Button
           aria-label={`${label} ${addLabel}`}
           className="ml-auto shrink-0"
-          onClick={() => onChange([...rows, { key: "", value: "" }])}
+          onClick={() => onChange([...rows, blankRow()])}
           size="xs"
           type="button"
           variant="outline"
@@ -105,7 +120,11 @@ export function KeyValueEditor({
       {rows.length > 0 && (
         <div className="pt-1">
           <DataTablePanel
-            columns={["w-[38%]", undefined, "w-12"]}
+            columns={[
+              "w-[38%]",
+              undefined,
+              inheritedLabel === undefined ? "w-12" : "w-20",
+            ]}
             header={
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -120,63 +139,77 @@ export function KeyValueEditor({
             rows={Math.min(rows.length, MAX_ROWS)}
           >
             <TableBody>
-              {rows.map((row, index) => (
-                // Rows are positional and their inputs are controlled from
-                // state, so the index is the row identity.
-                <TableRow className="hover:bg-transparent" key={index}>
-                  <TableCell className="p-1">
-                    <Input
-                      aria-label={`${label} ${keyLabel}`}
-                      className="h-7"
-                      onChange={(event) =>
-                        onChange(
-                          rows.map((entry, position) =>
-                            position === index
-                              ? { ...entry, key: event.target.value }
-                              : entry,
-                          ),
-                        )
-                      }
-                      placeholder={keyLabel}
-                      value={row.key}
-                    />
-                  </TableCell>
-                  <TableCell className="p-1">
-                    <Input
-                      aria-label={`${label} ${valueLabel}`}
-                      className="h-7"
-                      onChange={(event) =>
-                        onChange(
-                          rows.map((entry, position) =>
-                            position === index
-                              ? { ...entry, value: event.target.value }
-                              : entry,
-                          ),
-                        )
-                      }
-                      placeholder={valueLabel}
-                      value={row.value}
-                    />
-                  </TableCell>
-                  <TableCell className="p-1">
-                    <div className="flex justify-center">
-                      <IconButton
-                        aria-label={`${label} ${removeLabel}`}
-                        onClick={() =>
+              {rows.map((row) => {
+                const isInherited =
+                  inheritedLabel !== undefined && row.isInherited === true;
+                return (
+                  <TableRow className="hover:bg-transparent" key={row.id}>
+                    <TableCell className="p-1">
+                      {isInherited ? (
+                        <span className="block truncate px-2.5 py-1">
+                          {row.key}
+                        </span>
+                      ) : (
+                        <Input
+                          aria-label={`${label} ${keyLabel}`}
+                          className="h-7"
+                          onChange={(event) =>
+                            onChange(
+                              rows.map((entry) =>
+                                entry.id === row.id
+                                  ? { ...entry, key: event.target.value }
+                                  : entry,
+                              ),
+                            )
+                          }
+                          placeholder={keyLabel}
+                          value={row.key}
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell className="p-1">
+                      <Input
+                        aria-label={`${label} ${valueLabel}`}
+                        className="h-7"
+                        onChange={(event) =>
                           onChange(
-                            rows.filter((_, position) => position !== index),
+                            rows.map((entry) =>
+                              entry.id === row.id
+                                ? { ...entry, value: event.target.value }
+                                : entry,
+                            ),
                           )
                         }
-                        size="icon-xs"
-                        type="button"
-                        variant="destructive"
-                      >
-                        <X className="size-3" />
-                      </IconButton>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+                        placeholder={valueLabel}
+                        value={row.value}
+                      />
+                    </TableCell>
+                    <TableCell className="p-1">
+                      <div className="flex justify-center">
+                        {isInherited ? (
+                          <span className="text-muted-foreground text-xs">
+                            {inheritedLabel}
+                          </span>
+                        ) : (
+                          <IconButton
+                            aria-label={`${label} ${removeLabel}`}
+                            onClick={() =>
+                              onChange(
+                                rows.filter((entry) => entry.id !== row.id),
+                              )
+                            }
+                            size="icon-xs"
+                            type="button"
+                            variant="destructive"
+                          >
+                            <X className="size-3" />
+                          </IconButton>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </DataTablePanel>
         </div>
@@ -188,4 +221,8 @@ export function KeyValueEditor({
       )}
     </div>
   );
+}
+
+function blankRow(): KeyValueRow {
+  return { id: crypto.randomUUID(), key: "", value: "" };
 }

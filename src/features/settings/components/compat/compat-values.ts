@@ -25,6 +25,9 @@ import { jsonValueSchema } from "../../schemas/json";
  */
 export type FormCompatBuckets = z.input<typeof compatBucketsSchema>;
 
+/** One map field's keys, as the wire shape holds them. */
+export type MapFields = Record<string, JsonValue>;
+
 /** Result of reading a JSON editor's text: the parsed value or a refusal. */
 export type StrictJson = { ok: false } | { ok: true; value: JsonValue };
 
@@ -37,6 +40,58 @@ type FormCompatFragment = Exclude<
 /** The editing text of a JSON field; an unset field opens blank. */
 export function formatJsonValue(value: JsonValue | undefined): string {
   return value === undefined ? "" : JSON.stringify(value, null, 2);
+}
+
+/**
+ * A map field's keys as a plain record: anything that is not an object carries
+ * none, and an explicit null entry means "unset" and drops out, the way null
+ * reads everywhere else on the wire.
+ */
+export function mapRecord(value: JsonValue | undefined): MapFields {
+  const record: MapFields = {};
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    return record;
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry !== null) {
+      record[key] = entry;
+    }
+  }
+  return record;
+}
+
+/**
+ * `inherited` with `own` merged over it, key by key — the mirror of the Rust
+ * compat merge (`merge_object`, src-tauri/src/provider/config.rs) used to read
+ * a map key's effective value. An explicit null in `own` never clears a key,
+ * and a key that is an object on both sides merges instead of replacing; any
+ * other pair the overlay wins, which is what the Rust layer does above the
+ * recursion. A commit still writes this layer's own fragment.
+ */
+export function mergeObjectValue(
+  inherited: JsonValue | undefined,
+  own: JsonValue,
+): JsonValue {
+  if (!isPlainObject(inherited) || !isPlainObject(own)) {
+    return own;
+  }
+  const merged: MapFields = { ...inherited };
+  for (const [key, value] of Object.entries(own)) {
+    if (value === null) {
+      continue;
+    }
+    const existing = merged[key];
+    merged[key] =
+      isPlainObject(existing) && isPlainObject(value)
+        ? mergeObjectValue(existing, value)
+        : value;
+  }
+  return merged;
 }
 
 /**
@@ -196,6 +251,11 @@ function hasFields(fragment: object): boolean {
 /** Whether a value is part of the JSON surface a fragment can carry. */
 function isJsonValue(value: unknown): value is JsonValue {
   return jsonValueSchema.safeParse(value).success;
+}
+
+/** Whether a JSON value is an object the merge can descend into. */
+function isPlainObject(value: JsonValue | undefined): value is MapFields {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // The stored-shape guards narrow a record to the wire type once the family's

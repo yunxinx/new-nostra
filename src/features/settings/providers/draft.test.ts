@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { Provider, ProviderPreset } from "@/types/ipc";
 
+import type { KeyValueRow } from "../components/KeyValueEditor";
+
 import { providerDraftSchema } from "../schemas/provider";
 import {
   BLANK_PROVIDER_DRAFT,
@@ -224,8 +226,17 @@ describe("free provider name", () => {
 });
 
 describe("header row conversions", () => {
+  /** The pairs of a row list, its identity left out. */
+  function pairsOf(rows: KeyValueRow[]): { key: string; value: string }[] {
+    return rows.map(({ key, value }) => ({ key, value }));
+  }
+
+  function row(key: string, value: string): KeyValueRow {
+    return { id: `${key}:${value}`, key, value };
+  }
+
   it("lists stored headers as rows and an absent map as no rows", () => {
-    expect(headerRows({ "x-a": "1", "x-b": "2" })).toEqual([
+    expect(pairsOf(headerRows({ "x-a": "1", "x-b": "2" }))).toEqual([
       { key: "x-a", value: "1" },
       { key: "x-b", value: "2" },
     ]);
@@ -235,10 +246,10 @@ describe("header row conversions", () => {
   it("drops rows whose key is blank", () => {
     expect(
       headerRecord([
-        { key: "x-a", value: "1" },
-        { key: "   ", value: "2" },
-        { key: "", value: "" },
-        { key: "x-b", value: "" },
+        row("x-a", "1"),
+        row("   ", "2"),
+        row("", ""),
+        row("x-b", ""),
       ]),
     ).toEqual({ "x-a": "1", "x-b": "" });
   });

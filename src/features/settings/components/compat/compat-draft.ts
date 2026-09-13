@@ -10,6 +10,9 @@ import {
   type ProtocolFamily,
 } from "./compat-fields";
 import {
+  type MapFields,
+  mapRecord,
+  mergeObjectValue,
   overrideRecord,
   storedBuckets,
   withCompatOverride,
@@ -31,9 +34,47 @@ export function canonicalCompatValue(
   fallback: JsonValue | undefined,
 ): JsonValue | null {
   if (value === null || isDeepEqual(value, baseline)) return value;
+  if (kind === "map") {
+    const next = canonicalMapOverride(
+      mapRecord(value),
+      mapRecord(baseline),
+      mapRecord(fallback),
+    );
+    return Object.keys(next).length === 0 ? null : next;
+  }
   // An unset switch displays as off; returning to that display must not pin false.
   const inherited = kind === "switch" ? fallback === true : fallback;
   return changedValueCount(inherited, value) === 0 ? null : value;
+}
+
+/**
+ * A map's candidate override, normalized key by key: an explicit null is
+ * "unset" and drops out, a key back at its saved value keeps that saved
+ * representation, and a key that leaves the effective value where it was is no
+ * override at all. Every other key stays as it came in.
+ *
+ * The per-key rules cover the whole map as well: a map whose keys all repeat
+ * the layers below adds nothing, while a saved key keeps its representation
+ * even there — a whole-map comparison would be unable to tell the two apart.
+ */
+export function canonicalMapOverride(
+  candidate: MapFields,
+  baseline: MapFields,
+  fallback: MapFields,
+): MapFields {
+  const next: MapFields = {};
+  for (const [key, value] of Object.entries(candidate)) {
+    if (value === null) continue;
+    if (Object.hasOwn(baseline, key) && isDeepEqual(value, baseline[key])) {
+      next[key] = value;
+      continue;
+    }
+    if (isDeepEqual(mergeObjectValue(fallback[key], value), fallback[key])) {
+      continue;
+    }
+    next[key] = value;
+  }
+  return next;
 }
 
 export function changedCompatCount(

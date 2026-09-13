@@ -140,7 +140,11 @@ export function headerRecord(rows: KeyValueRow[]): Record<string, string> {
 export function headerRows(
   headers: Record<string, string> | undefined,
 ): KeyValueRow[] {
-  return Object.entries(headers ?? {}).map(([key, value]) => ({ key, value }));
+  return Object.entries(headers ?? {}).map(([key, value]) => ({
+    id: crypto.randomUUID(),
+    key,
+    value,
+  }));
 }
 
 /**

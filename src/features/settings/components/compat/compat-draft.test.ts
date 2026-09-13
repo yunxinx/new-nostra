@@ -6,6 +6,7 @@ import type { ProtocolFamily } from "./compat-fields";
 
 import {
   canonicalCompatValue,
+  canonicalMapOverride,
   changedCompatCount,
   hasCustomCompat,
   hasInvalidCompatInputs,
@@ -67,6 +68,58 @@ describe("compat input drafts", () => {
     });
     expect(changedCompatCount(baseline, baseline, inputs)).toBe(0);
     expect(hasInvalidCompatInputs(inputs)).toBe(false);
+  });
+});
+
+describe("compat map overrides", () => {
+  it("reads a key by its parsed value: number spelling and key order are not edits", () => {
+    expect(canonicalMapOverride({ a: 1.0 }, {}, { a: 1 })).toEqual({});
+    expect(
+      canonicalMapOverride({ a: { x: 1, y: 2 } }, {}, { a: { x: 1, y: 2 } }),
+    ).toEqual({});
+    // A nested fragment that merges back into the layer below moves nothing.
+    expect(
+      canonicalMapOverride(
+        { a: { options: { b: 2 } } },
+        {},
+        { a: { options: { a: 1, b: 2 } } },
+      ),
+    ).toEqual({});
+    // An explicit null is unset, never an override of its own.
+    expect(canonicalMapOverride({ a: null }, {}, {})).toEqual({});
+  });
+
+  it("keeps a key that moves the effective value and one no layer below holds", () => {
+    expect(canonicalMapOverride({ a: 2 }, {}, { a: 1 })).toEqual({ a: 2 });
+    expect(
+      canonicalMapOverride(
+        { a: { options: { b: 9 } } },
+        {},
+        { a: { options: { a: 1, b: 2 } } },
+      ),
+    ).toEqual({ a: { options: { b: 9 } } });
+    expect(canonicalMapOverride({ fresh: 1 }, {}, {})).toEqual({ fresh: 1 });
+  });
+
+  it("keeps the saved representation of a key back at its saved value", () => {
+    // The layers below resolve to the same value; the stored override stays.
+    expect(canonicalMapOverride({ a: 1, b: 2 }, { a: 1 }, { a: 1 })).toEqual({
+      a: 1,
+      b: 2,
+    });
+  });
+
+  it("normalizes a whole map through canonicalCompatValue", () => {
+    expect(
+      canonicalCompatValue("map", { a: 1, b: 2 }, undefined, { a: 1 }),
+    ).toEqual({ b: 2 });
+    expect(canonicalCompatValue("map", { a: 1 }, { a: 1 }, { a: 1 })).toEqual({
+      a: 1,
+    });
+    expect(
+      canonicalCompatValue("map", { a: 1 }, undefined, { a: 1 }),
+    ).toBeNull();
+    expect(canonicalCompatValue("map", {}, undefined, { a: 1 })).toBeNull();
   });
 });
 

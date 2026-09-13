@@ -83,9 +83,15 @@ export function CompatSection({
       )}
       {compatFieldsFor(family).map((descriptor) => {
         const isOverridden = Object.hasOwn(bucket, descriptor.name);
+        // A map keeps its two layers apart — its rows read the effective value
+        // and submit this layer's own fragment — so it takes the raw bucket
+        // entry; the other controls show the folded effective value.
+        const isMap = descriptor.kind === "map";
         return (
           <CompatField
+            baseline={isMap ? baseline?.[descriptor.name] : undefined}
             descriptor={descriptor}
+            inherited={isMap ? fallbacks[descriptor.name] : undefined}
             input={inputs[family]?.[descriptor.name]}
             key={`${descriptor.name}:${String(restored[descriptor.name] ?? 0)}`}
             onCommit={(value) =>
@@ -116,7 +122,7 @@ export function CompatSection({
             }
             source={isOverridden ? layerSource : sources[descriptor.name]}
             value={
-              isOverridden
+              isMap || isOverridden
                 ? bucket[descriptor.name]
                 : fallbacks[descriptor.name]
             }

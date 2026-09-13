@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { ModelCost, ModelEntry } from "@/types/ipc";
 
+import type { KeyValueRow } from "../components/KeyValueEditor";
+
 import {
   addModelRow,
   BLANK_MODEL_ENTRY,
@@ -212,8 +214,17 @@ describe("cost rules", () => {
 });
 
 describe("sampling parameter rows", () => {
+  /** A row of the editor; the identity is not part of what these tests read. */
+  function row(key: string, value: string): KeyValueRow {
+    return { id: `${key}:${value}`, key, value };
+  }
+
   it("shows stored values as their JSON text", () => {
-    expect(samplingRows({ stream: true, temperature: 0.7 })).toEqual([
+    expect(
+      samplingRows({ stream: true, temperature: 0.7 }).map(
+        ({ key, value }) => ({ key, value }),
+      ),
+    ).toEqual([
       { key: "stream", value: "true" },
       { key: "temperature", value: "0.7" },
     ]);
@@ -231,13 +242,10 @@ describe("sampling parameter rows", () => {
 
   it("drops blank-key rows and an all-blank map", () => {
     expect(
-      samplingParamsRecord([
-        { key: "temperature", value: "0.7" },
-        { key: "  ", value: "0.1" },
-      ]),
+      samplingParamsRecord([row("temperature", "0.7"), row("  ", "0.1")]),
     ).toEqual({ temperature: 0.7 });
     expect(samplingParamsRecord([])).toBeUndefined();
-    expect(samplingParamsRecord([{ key: "", value: "1" }])).toBeUndefined();
+    expect(samplingParamsRecord([row("", "1")])).toBeUndefined();
   });
 });
 

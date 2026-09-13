@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -12,6 +13,7 @@ import { useForm, type UseFormReturn, useWatch } from "react-hook-form";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type {
+  CompatBuckets,
   CompatSource,
   JsonValue,
   ProviderDraft,
@@ -28,10 +30,12 @@ import type {
   ProtocolFamily,
 } from "../../components/compat/compat-fields";
 
+import { changedCompatCount } from "../../components/compat/compat-draft";
 import {
   compatFieldsFor,
   knownCompatFamilies,
 } from "../../components/compat/compat-fields";
+import { storedBuckets } from "../../components/compat/compat-values";
 import { useCompatResolution } from "../../components/compat/use-compat-resolution";
 import {
   anthropicMessagesCompatSchema,
@@ -84,7 +88,15 @@ const RESOLUTIONS: Record<ProtocolFamily, ResolvedCompat> = {
   "openai-responses": resolutionOf("openai-responses"),
 };
 
-beforeAll(initI18n);
+beforeAll(() => {
+  initI18n();
+  // The select's pointer handlers and item highlighting reach for the
+  // pointer-capture and scrolling APIs jsdom does not implement.
+  Element.prototype.hasPointerCapture = () => false;
+  Element.prototype.releasePointerCapture = () => undefined;
+  Element.prototype.scrollIntoView = () => undefined;
+  Element.prototype.setPointerCapture = () => undefined;
+});
 
 afterEach(cleanup);
 
@@ -92,6 +104,11 @@ interface HostProps {
   draft: ProviderDraft;
   /** The family the panel configures; the switcher above it owns the choice. */
   family: ProtocolFamily;
+}
+
+/** The draft's change count, derived the way the controllers derive theirs. */
+function changedCount(): number {
+  return Number(screen.getByTestId("changed").textContent);
 }
 
 function checkedIn(row: HTMLElement): null | string {
@@ -104,10 +121,27 @@ function compatOf(): unknown {
   return parsed;
 }
 
-function CompatProbe({ form }: { form: CompatForm }) {
+function CompatProbe({
+  baseline,
+  form,
+  inputs,
+}: {
+  baseline: CompatBuckets | undefined;
+  form: CompatForm;
+  inputs: CompatInputDrafts;
+}) {
   const compat = useWatch({ control: form.control, name: "compat" });
+  const stored = storedBuckets(compat);
   // An unset map renders as `null`, so the probe's text is always JSON.
-  return <output data-testid="compat">{JSON.stringify(compat ?? null)}</output>;
+  return (
+    <>
+      <output data-testid="compat">{JSON.stringify(compat ?? null)}</output>
+      <output data-testid="stored">{JSON.stringify(stored ?? null)}</output>
+      <output data-testid="changed">
+        {changedCompatCount(baseline, stored, inputs)}
+      </output>
+    </>
+  );
 }
 
 function familyLabel(family: ProtocolFamily): string {
@@ -151,7 +185,7 @@ function Host({ draft, family }: HostProps) {
         onInputsChange={setInputs}
         resolution={resolution}
       />
-      <CompatProbe form={form} />
+      <CompatProbe baseline={draft.compat} form={form} inputs={inputs} />
     </TooltipProvider>
   );
 }
@@ -196,6 +230,12 @@ function sampleValue(descriptor: CompatFieldDescriptor): JsonValue {
   }
 }
 
+/** The map's wire shape: what a save submits, and what a re-read decodes. */
+function storedOf(): unknown {
+  const parsed: unknown = JSON.parse(screen.getByTestId("stored").textContent);
+  return parsed;
+}
+
 function switchIn(row: HTMLElement): HTMLElement {
   return within(row).getByRole("switch");
 }
@@ -236,10 +276,11 @@ describe("provider compat panel", () => {
       />,
     );
     await waitFor(() =>
+      // The map inherits the resolved keys as rows named by their keys.
       expect(
-        within(
-          fieldRow("openai-completions", "openRouterRouting"),
-        ).getByDisplayValue("order"),
+        within(fieldRow("openai-completions", "openRouterRouting")).getByText(
+          "order",
+        ),
       ).toBeTruthy(),
     );
     const priority = fieldRow("openai-completions", "vllmPriority");
@@ -513,6 +554,295 @@ describe("provider compat panel", () => {
     ).toBeTruthy();
     expect(compatOf()).toEqual({
       "openai-completions": { supportsStore: false },
+    });
+  });
+});
+
+describe("the unset entry of a select field", () => {
+  /** A family without resolved defaults: only the draft's own writes show. */
+  function renderBareHost(draft: ProviderDraft): void {
+    resolveCompatMock.mockImplementation(() =>
+      Promise.resolve({ sources: {}, values: {} }),
+    );
+    render(<Host draft={draft} family="openai-completions" />);
+  }
+
+  function selectIn(field: string): HTMLElement {
+    return within(fieldRow("openai-completions", field)).getByRole("combobox");
+  }
+
+  function openSelect(field: string): void {
+    fireEvent.click(selectIn(field));
+  }
+
+  /** Picks an entry from the open list; it lives in a portal on the body. */
+  function pick(entry: string): void {
+    fireEvent.click(screen.getByRole("option", { name: entry }));
+  }
+
+  it("round-trips a value through unset", async () => {
+    renderBareHost(BASE);
+    await screen.findByRole("group", {
+      name: fieldLabel("cacheControlFormat"),
+    });
+    expect(selectIn("cacheControlFormat").textContent).toContain(
+      i18next.t("settings.providers.compatUnset"),
+    );
+
+    openSelect("cacheControlFormat");
+    pick("anthropic");
+    expect(compatOf()).toEqual({
+      "openai-completions": { cacheControlFormat: "anthropic" },
+    });
+    expect(changedCount()).toBe(1);
+
+    openSelect("cacheControlFormat");
+    pick(i18next.t("settings.providers.compatUnset"));
+    expect(compatOf()).toBeNull();
+    // The key leaves the wire shape, so a save stores the field unset and a
+    // re-read opens it unset again.
+    expect(storedOf()).toBeNull();
+    expect(changedCount()).toBe(0);
+    expect(selectIn("cacheControlFormat").textContent).toContain(
+      i18next.t("settings.providers.compatUnset"),
+    );
+
+    openSelect("cacheControlFormat");
+    pick("anthropic");
+    expect(compatOf()).toEqual({
+      "openai-completions": { cacheControlFormat: "anthropic" },
+    });
+  });
+
+  it("treats picking unset on an unset field as a no-op", async () => {
+    renderBareHost(BASE);
+    await screen.findByRole("group", {
+      name: fieldLabel("cacheControlFormat"),
+    });
+
+    openSelect("cacheControlFormat");
+    pick(i18next.t("settings.providers.compatUnset"));
+
+    expect(compatOf()).toBeNull();
+    expect(storedOf()).toBeNull();
+    expect(changedCount()).toBe(0);
+    expect(
+      within(fieldRow("openai-completions", "cacheControlFormat")).queryByRole(
+        "button",
+        { name: i18next.t("common.revertField") },
+      ),
+    ).toBeNull();
+  });
+
+  it("clears an override back to the inherited value and its provenance", async () => {
+    renderHost({
+      draft: {
+        ...BASE,
+        compat: { "openai-completions": { cacheControlFormat: "anthropic" } },
+      },
+      family: "openai-completions",
+    });
+    await screen.findByRole("group", {
+      name: fieldLabel("cacheControlFormat"),
+    });
+    expect(
+      within(fieldRow("openai-completions", "cacheControlFormat")).getByText(
+        "Provider",
+      ),
+    ).toBeTruthy();
+
+    openSelect("cacheControlFormat");
+    pick(i18next.t("settings.providers.compatUnset"));
+
+    expect(compatOf()).toBeNull();
+    expect(changedCount()).toBe(1);
+    // The resolved default owns the value again, tag included.
+    await waitFor(() => {
+      expect(
+        within(fieldRow("openai-completions", "cacheControlFormat")).getByText(
+          "Family default",
+        ),
+      ).toBeTruthy();
+    });
+    expect(selectIn("cacheControlFormat").textContent).toContain("anthropic");
+
+    fireEvent.click(
+      within(fieldRow("openai-completions", "cacheControlFormat")).getByRole(
+        "button",
+        { name: i18next.t("common.revertField") },
+      ),
+    );
+    expect(compatOf()).toEqual({
+      "openai-completions": { cacheControlFormat: "anthropic" },
+    });
+    expect(changedCount()).toBe(0);
+  });
+});
+
+describe("the merged view of a map field", () => {
+  const FIELD = "chatTemplateKwargs";
+
+  function mapCell(cell: string): string {
+    return `${fieldLabel(FIELD)} ${i18next.t(`settings.providers.${cell}`)}`;
+  }
+
+  /** The resolution the panel reads: one map field over an empty lower layer. */
+  function resolveMap(values: Record<string, JsonValue>): void {
+    resolveCompatMock.mockImplementation(() =>
+      Promise.resolve({
+        sources: { chatTemplateKwargs: "vendor" },
+        values: { chatTemplateKwargs: values },
+      }),
+    );
+  }
+
+  /** The body row of the map field whose key reads as `key`, own or inherited. */
+  function keyedRow(key: string): HTMLElement {
+    const rows = within(fieldRow("openai-completions", FIELD))
+      .getAllByRole("row")
+      .slice(1);
+    const row = rows.find((entry) => {
+      const cell = entry.querySelector("td");
+      return (
+        cell?.querySelector("input")?.value === key || cell?.textContent === key
+      );
+    });
+    if (row === undefined) {
+      throw new Error(`the map holds no row for ${key}`);
+    }
+    return row;
+  }
+
+  function draftWith(map: Record<string, JsonValue>): ProviderDraft {
+    return {
+      ...BASE,
+      compat: { "openai-completions": { chatTemplateKwargs: map } },
+    };
+  }
+
+  /** The panel over a draft of its own, with `resolveMap`'s answer in place. */
+  function renderMapHost(draft: ProviderDraft): ReturnType<typeof render> {
+    return render(<Host draft={draft} family="openai-completions" />);
+  }
+
+  it("shows a partly overridden key with its effective value and submits only this layer's keys", async () => {
+    resolveMap({ budget: 100, enable_thinking: true });
+    renderMapHost(draftWith({ budget: 200 }));
+    await screen.findByRole("group", { name: fieldLabel(FIELD) });
+    await waitFor(() => {
+      expect(
+        within(keyedRow("enable_thinking")).getByText(
+          i18next.t("settings.providers.compatInherited"),
+        ),
+      ).toBeTruthy();
+    });
+
+    // The inherited row shows the layers below and reads its key as text; the
+    // budget row is this layer's own and keeps the value it stores.
+    expect(within(keyedRow("budget")).getByDisplayValue("200")).toBeTruthy();
+    expect(
+      within(keyedRow("enable_thinking")).queryByDisplayValue(
+        "enable_thinking",
+      ),
+    ).toBeNull();
+
+    fireEvent.change(within(keyedRow("enable_thinking")).getByRole("textbox"), {
+      target: { value: "false" },
+    });
+
+    // The payload carries this layer's keys alone, and the inherited override
+    // counts as one change.
+    expect(compatOf()).toEqual({
+      "openai-completions": {
+        chatTemplateKwargs: { budget: 200, enable_thinking: false },
+      },
+    });
+    expect(changedCount()).toBe(1);
+  });
+
+  it("brings a deleted own key back as the layer below's row", async () => {
+    resolveMap({ budget: 100, enable_thinking: true });
+    renderMapHost(draftWith({ budget: 200 }));
+    await screen.findByRole("group", { name: fieldLabel(FIELD) });
+    await waitFor(() => {
+      expect(
+        within(keyedRow("enable_thinking")).getByText(
+          i18next.t("settings.providers.compatInherited"),
+        ),
+      ).toBeTruthy();
+    });
+
+    fireEvent.click(
+      within(keyedRow("budget")).getByRole("button", {
+        name: mapCell("compatRemoveMapEntry"),
+      }),
+    );
+
+    // The key is still in force below: its row stays, showing that value.
+    expect(within(keyedRow("budget")).getByDisplayValue("100")).toBeTruthy();
+    expect(
+      within(keyedRow("budget")).getByText(
+        i18next.t("settings.providers.compatInherited"),
+      ),
+    ).toBeTruthy();
+    expect(compatOf()).toBeNull();
+  });
+
+  it("keeps a row still being typed when the resolve lands underneath it", async () => {
+    let land: (resolution: ResolvedCompat) => void = () => undefined;
+    resolveCompatMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          land = resolve;
+        }),
+    );
+    render(<Host draft={BASE} family="openai-completions" />);
+    const row = await screen.findByRole("group", { name: fieldLabel(FIELD) });
+
+    // A row is added and its key typed; the value is still to come.
+    fireEvent.click(
+      within(row).getByRole("button", { name: mapCell("compatAddMapEntry") }),
+    );
+    const keyCell = within(row).getByLabelText(mapCell("compatMapKey"));
+    fireEvent.change(keyCell, { target: { value: "temperature" } });
+    const composing = keyCell.closest("tr");
+    if (composing === null) {
+      throw new Error("the row left its table");
+    }
+
+    await waitFor(() => {
+      expect(resolveCompatMock).toHaveBeenCalled();
+    });
+    await act(async () => {
+      land({
+        sources: { chatTemplateKwargs: "vendor" },
+        values: { chatTemplateKwargs: { budget: 100 } },
+      });
+      // Let the panel read the resolution inside this act pass.
+      await Promise.resolve();
+    });
+
+    // The resolve adds its own key; the row being composed stays put.
+    await waitFor(() => {
+      expect(
+        within(keyedRow("budget")).getByText(
+          i18next.t("settings.providers.compatInherited"),
+        ),
+      ).toBeTruthy();
+    });
+    expect(
+      within(composing).getByLabelText(mapCell("compatMapKey")),
+    ).toHaveProperty("value", "temperature");
+
+    // Finishing the row makes it this layer's own override.
+    fireEvent.change(
+      within(composing).getByLabelText(mapCell("compatMapValue")),
+      {
+        target: { value: "1" },
+      },
+    );
+    expect(compatOf()).toEqual({
+      "openai-completions": { chatTemplateKwargs: { temperature: 1 } },
     });
   });
 });

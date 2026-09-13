@@ -4,6 +4,8 @@ import type { CompatBuckets } from "@/types/ipc";
 
 import {
   formatJsonValue,
+  mapRecord,
+  mergeObjectValue,
   overrideRecord,
   parseCellText,
   parseStrictJson,
@@ -40,6 +42,46 @@ describe("compat value text", () => {
     expect(formatJsonValue(undefined)).toBe("");
     expect(formatJsonValue(3)).toBe("3");
     expect(formatJsonValue({ a: 1 })).toBe('{\n  "a": 1\n}');
+  });
+});
+
+describe("compat map values", () => {
+  it("reads a map value as its keys, an explicit null dropping out", () => {
+    expect(mapRecord({ a: 1, b: null })).toEqual({ a: 1 });
+    expect(mapRecord(undefined)).toEqual({});
+    expect(mapRecord(null)).toEqual({});
+    expect(mapRecord([1, 2])).toEqual({});
+    expect(mapRecord("plain")).toEqual({});
+  });
+
+  it("merges nested objects key by key and lets the overlay win elsewhere", () => {
+    expect(
+      mergeObjectValue({ options: { a: 1, b: 2 } }, { options: { b: 3 } }),
+    ).toEqual({ options: { a: 1, b: 3 } });
+    // An array is replaced whole, and a key only the layer below holds stays.
+    expect(
+      mergeObjectValue({ order: ["first"] }, { order: ["second"] }),
+    ).toEqual({ order: ["second"] });
+    expect(mergeObjectValue({ keep: 1 }, {})).toEqual({ keep: 1 });
+    expect(mergeObjectValue({ a: { deep: true } }, { a: 5 })).toEqual({ a: 5 });
+    expect(mergeObjectValue({ a: 5 }, { a: { deep: true } })).toEqual({
+      a: { deep: true },
+    });
+    // A key no layer below holds is the overlay's own.
+    expect(mergeObjectValue({}, { fresh: 1 })).toEqual({ fresh: 1 });
+  });
+
+  it("never lets an explicit null clear a key of the layer below", () => {
+    expect(mergeObjectValue({ a: 1, b: 2 }, { a: null })).toEqual({
+      a: 1,
+      b: 2,
+    });
+    expect(
+      mergeObjectValue({ options: { a: 1 } }, { options: { a: null, b: 2 } }),
+    ).toEqual({ options: { a: 1, b: 2 } });
+    // The null is not a value of its own either: the merged view has no such
+    // key at all when the layer below holds none.
+    expect(mergeObjectValue({}, { a: null })).toEqual({});
   });
 });
 
