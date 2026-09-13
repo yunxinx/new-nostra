@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
 import type { AppError } from "@/types/ipc";
+import type { ModelSelection } from "@/types/model-selection";
 
 // Map/Set drafts need the immer plugin; the call is idempotent.
 enableMapSet();
@@ -29,6 +30,8 @@ interface UiState {
   endSubmit: (key: string) => void;
   /** Session id whose sidebar row is playing its enter animation. */
   enteringSessionId: null | string;
+  /** Model picked per draft location: a session id, or `draft:<n>`. */
+  modelByDraft: Map<string, ModelSelection>;
   pendingDeletes: Set<string>;
   pendingSubmits: Set<string>;
   resolveSubmit: (key: string, submittedText: string) => void;
@@ -36,14 +39,23 @@ interface UiState {
   setDraft: (key: string, text: string) => void;
   setDraftError: (key: string, error: AppError | null) => void;
   setEnteringSession: (id: string) => void;
+  setModel: (key: string, model: ModelSelection | null) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setSidebarWidth: (width: number) => void;
   setThemeOverride: (override: ThemeOverride) => void;
+  /**
+   * The settings window's own navigation column. Nothing writes it to disk:
+   * a settings window is created on demand, so it always opens with its
+   * navigation visible.
+   */
+  settingsNavCollapsed: boolean;
   sidebarCollapsed: boolean;
   sidebarWidth: number;
   startNewChat: () => void;
   themeOverride: ThemeOverride;
+  toggleSettingsNavCollapsed: () => void;
   toggleSidebarCollapsed: () => void;
+  transferDraftModel: (draftKey: string, sessionId: string) => void;
 }
 
 /** Draft location for the anonymous new-chat target: `draft:<draftId>`. */
@@ -70,6 +82,7 @@ export const useUiStore = create<UiState>()(
       set((state) => {
         state.drafts.delete(key);
         state.draftErrors.delete(key);
+        state.modelByDraft.delete(key);
       }),
     draftErrors: new Map(),
     draftId: 0,
@@ -83,6 +96,7 @@ export const useUiStore = create<UiState>()(
         state.pendingSubmits.delete(key);
       }),
     enteringSessionId: null,
+    modelByDraft: new Map(),
     pendingDeletes: new Set(),
     pendingSubmits: new Set(),
     resolveSubmit: (key, submittedText) =>
@@ -116,6 +130,11 @@ export const useUiStore = create<UiState>()(
       set((state) => {
         state.enteringSessionId = enteringSessionId;
       }),
+    setModel: (key, model) =>
+      set((state) => {
+        if (model === null) state.modelByDraft.delete(key);
+        else state.modelByDraft.set(key, model);
+      }),
     setSidebarCollapsed: (sidebarCollapsed) =>
       set((state) => {
         state.sidebarCollapsed = sidebarCollapsed;
@@ -133,6 +152,7 @@ export const useUiStore = create<UiState>()(
       set((state) => {
         state.themeOverride = themeOverride;
       }),
+    settingsNavCollapsed: false,
     sidebarCollapsed: false,
     sidebarWidth: 272,
     startNewChat: () =>
@@ -142,13 +162,27 @@ export const useUiStore = create<UiState>()(
         const key = draftKeyFor(state.draftId);
         state.drafts.delete(key);
         state.draftErrors.delete(key);
+        state.modelByDraft.delete(key);
         state.activeSessionId = null;
         state.draftId += 1;
       }),
     themeOverride: "system",
+    toggleSettingsNavCollapsed: () =>
+      set((state) => {
+        state.settingsNavCollapsed = !state.settingsNavCollapsed;
+      }),
     toggleSidebarCollapsed: () =>
       set((state) => {
         state.sidebarCollapsed = !state.sidebarCollapsed;
+      }),
+    transferDraftModel: (draftKey, sessionId) =>
+      set((state) => {
+        const model = state.modelByDraft.get(draftKey);
+        // A selection made directly in the created session takes precedence.
+        if (model !== undefined && !state.modelByDraft.has(sessionId)) {
+          state.modelByDraft.set(sessionId, model);
+        }
+        state.modelByDraft.delete(draftKey);
       }),
   })),
 );

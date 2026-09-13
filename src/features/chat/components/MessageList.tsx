@@ -263,7 +263,7 @@ function ChatPane({ composerKey, onSend, path, sessionId }: ChatPaneProps) {
   return (
     <div className="relative h-full min-h-0">
       <div
-        className="h-full overflow-y-auto"
+        className="scrollbar-thin-stable h-full scrollbar-gutter-stable overflow-x-hidden overflow-y-auto"
         onScroll={handleScroll}
         ref={scrollRef}
       >

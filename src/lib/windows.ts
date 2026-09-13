@@ -30,8 +30,11 @@ export async function openSettings(): Promise<void> {
     // WindowOptions x/y are logical pixels; hiddenTitle maps to macOS
     // NSWindow.titleVisibility = hidden so the overlay title bar draws no text.
     hiddenTitle: true,
-    minHeight: 420,
-    minWidth: 640,
+    // The three columns (200px nav + 200px provider list + the detail pane)
+    // plus the detail's own six-column model table set the floor: below this
+    // the pane cannot show a row's label and its control on one line.
+    minHeight: 480,
+    minWidth: 860,
     title: "Nostra Settings",
     titleBarStyle: "overlay",
     url: "settings.html",

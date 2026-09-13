@@ -7,12 +7,10 @@
   // extensions outside `project` are not).
   "entry": ["src/settings-main.tsx"],
   "ignoreExportsUsedInFile": false,
-  // Part of the settings-form control trio (PRD .trellis/tasks/09-08-settings-ui);
-  // no boolean preference row exists until the logs-domain settings land.
-  "ignore": ["src/components/ui/switch.tsx"],
   // 1. shadcn generator emits the full component variant set; trimming to
   //    only what is used would churn on every regeneration.
   "ignoreIssues": {
+    "src/components/ui/alert-dialog.tsx": ["exports"],
     "src/components/ui/dropdown-menu.tsx": ["exports"],
     "src/components/ui/popover.tsx": ["exports"],
     "src/components/ui/select.tsx": ["exports"],

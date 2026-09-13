@@ -13,16 +13,10 @@ interface UserBubbleProps {
 export function UserBubble({ isTurnEnd, parts }: UserBubbleProps) {
   return (
     <div className="group/turn">
-      {/* select-text/cursor-text whitelist the bubble under the body-wide
-          no-selection backout; copying one's own message is a legitimate need
-          and the I-beam is the correct cursor over selectable text. The flex
-          wrapper shrink-wraps the bubble to its text and right-aligns it; a
-          bare block div would fill the full 560px width. Part boundaries
-          stay visible as paragraph gaps instead of merging the parts into one
-          string. Direct field access keeps rendering exhaustive: a new
-          ContentBlock variant fails compilation until the bubble handles it. */}
+      {/* Text selection overrides the body-wide opt-out. wrap-anywhere includes
+          break opportunities in min-content sizing so the flex bubble can shrink. */}
       <div className="flex justify-end pb-1">
-        <div className="bg-secondary text-secondary-foreground max-w-[560px] cursor-text rounded-lg px-3 py-1.5 text-sm whitespace-pre-wrap select-text">
+        <div className="bg-secondary text-secondary-foreground max-w-[560px] cursor-text rounded-lg px-3 py-1.5 text-sm wrap-anywhere whitespace-pre-wrap select-text">
           {parts.map((part, index) => (
             <Fragment key={index}>
               {index > 0 ? "\n\n" : null}

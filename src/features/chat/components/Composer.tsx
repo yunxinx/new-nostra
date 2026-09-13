@@ -10,6 +10,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { isComposing } from "@/lib/keyboard";
 
 import { ComposerFocusContext } from "../composer-focus-context";
 
@@ -72,11 +73,7 @@ export function Composer({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
-    // IME confirmation can arrive after compositionend. Remove this fallback
-    // when supported WebViews report those keydowns as isComposing.
-    // eslint-disable-next-line @typescript-eslint/no-deprecated
-    const isCompositionKey = event.nativeEvent.keyCode === 229;
-    if (event.nativeEvent.isComposing || isCompositionKey) {
+    if (isComposing(event.nativeEvent)) {
       return;
     }
     if (event.key === "Enter" && !event.shiftKey) {

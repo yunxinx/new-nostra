@@ -15,6 +15,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { isComposing } from "@/lib/keyboard";
 import { useUiStore } from "@/stores/ui-store";
 
 import {
@@ -166,7 +167,7 @@ export function SessionRow({ isActive, onSelect, session }: SessionRowProps) {
         <>
           <div
             aria-hidden="true"
-            className="session-fade pointer-events-none invisible absolute inset-y-0 right-0 w-[120px] rounded-[6px] group-focus-within/row:visible group-hover/row:visible"
+            className="session-fade pointer-events-none invisible absolute inset-y-0 right-0 w-20 rounded-[6px] group-focus-within/row:visible group-hover/row:visible"
           />
           <div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100">
             <Button
@@ -324,12 +325,7 @@ function InlineRename({ onDone, session }: InlineRenameProps) {
           onChange={(event) => setTitle(event.target.value)}
           onFocus={(event) => event.currentTarget.select()}
           onKeyDown={(event) => {
-            // IME confirmation can arrive after compositionend. Remove this
-            // fallback when supported WebViews report those keydowns as
-            // isComposing.
-            // eslint-disable-next-line @typescript-eslint/no-deprecated
-            const isCompositionKey = event.nativeEvent.keyCode === 229;
-            if (event.nativeEvent.isComposing || isCompositionKey) {
+            if (isComposing(event.nativeEvent)) {
               return;
             }
             if (event.key === "Enter") {

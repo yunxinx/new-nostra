@@ -9,6 +9,7 @@ import type { Language } from "@/lib/i18n";
 import type { ThemeOverride } from "@/stores/ui-store";
 
 import { App } from "@/App";
+import { ProviderCatalogSync } from "@/components/common/ProviderCatalogSync";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { seedInitialTheme } from "@/features/appearance/use-theme";
 import { initI18n } from "@/lib/i18n";
@@ -65,6 +66,7 @@ void (async () => {
     <StrictMode>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
+          <ProviderCatalogSync />
           <App />
         </TooltipProvider>
       </QueryClientProvider>

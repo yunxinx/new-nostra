@@ -3,4 +3,5 @@
 //! `crate::types`; `rusqlite::Row` never leaks past this layer.
 
 pub mod entries;
+pub mod providers;
 pub mod sessions;

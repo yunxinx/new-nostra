@@ -8,7 +8,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useUiStore } from "@/stores/ui-store";
+
+interface SidebarToggleButtonProps {
+  isCollapsed: boolean;
+  onToggle: () => void;
+}
 
 // The icon states the action a click performs (expanded -> collapse), not the
 // current layout, matching the aria-label.
@@ -20,30 +24,31 @@ const iconClassName = cn(
   "motion-reduce:transition-none",
 );
 
-export function SidebarToggleButton() {
+// Shared by both windows so the two title bars offer one gesture: the button
+// reports the column it drives and nothing else — which store holds that
+// state is the caller's business.
+export function SidebarToggleButton({
+  isCollapsed,
+  onToggle,
+}: SidebarToggleButtonProps) {
   const { t } = useTranslation();
-  const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
-  const toggleSidebarCollapsed = useUiStore((s) => s.toggleSidebarCollapsed);
-
-  const label = sidebarCollapsed
-    ? t("app.expandSidebar")
-    : t("app.collapseSidebar");
+  const label = isCollapsed ? t("app.expandSidebar") : t("app.collapseSidebar");
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
           aria-label={label}
-          onClick={toggleSidebarCollapsed}
+          onClick={onToggle}
           size="icon-sm"
           variant="ghost"
         >
           <span className="relative inline-flex size-4 items-center justify-center">
             <PanelLeftClose
-              className={cn(iconClassName, sidebarCollapsed && "opacity-0")}
+              className={cn(iconClassName, isCollapsed && "opacity-0")}
             />
             <PanelLeftOpen
-              className={cn(iconClassName, !sidebarCollapsed && "opacity-0")}
+              className={cn(iconClassName, !isCollapsed && "opacity-0")}
             />
           </span>
         </Button>

@@ -8,6 +8,7 @@ import { createRoot } from "react-dom/client";
 import type { Language } from "@/lib/i18n";
 import type { ThemeOverride } from "@/stores/ui-store";
 
+import { ProviderCatalogSync } from "@/components/common/ProviderCatalogSync";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { seedInitialTheme } from "@/features/appearance/use-theme";
 import { SettingsWindowApp } from "@/features/settings/SettingsWindowApp";
@@ -63,6 +64,7 @@ void (async () => {
         {/* Tooltip primitives throw without a Provider context, so both window
             entries carry one even before any tooltip exists here. */}
         <TooltipProvider>
+          <ProviderCatalogSync />
           <SettingsWindowApp />
         </TooltipProvider>
       </QueryClientProvider>

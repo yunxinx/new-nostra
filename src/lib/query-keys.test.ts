@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { messagesKeys, sessionsKeys } from "./query-keys";
+import {
+  messagesKeys,
+  providerPresetsKeys,
+  providersKeys,
+  sessionsKeys,
+  unifiedModelsKeys,
+} from "./query-keys";
 
 describe("query key factories", () => {
   it("builds the session list keys with the pinned filter in the key", () => {
@@ -31,5 +37,11 @@ describe("query key factories", () => {
     expect(messagesKeys.bySession("s2")).not.toEqual(
       messagesKeys.bySession("s1"),
     );
+  });
+
+  it("keeps the provider, preset and unified-model roots disjoint", () => {
+    expect(providersKeys.all).toEqual(["providers"]);
+    expect(providerPresetsKeys.all).toEqual(["providerPresets"]);
+    expect(unifiedModelsKeys.all).toEqual(["unifiedModels"]);
   });
 });
