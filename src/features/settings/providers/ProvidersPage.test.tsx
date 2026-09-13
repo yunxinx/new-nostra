@@ -591,6 +591,41 @@ describe("provider detail sections", () => {
     );
   });
 
+  it("keeps a half-typed model name across a section switch", async () => {
+    await renderPage([STORED, OTHER], "Gateway");
+    clickRow("Gateway");
+    openSection("Models");
+
+    fireEvent.click(screen.getByRole("button", { name: "Display name · m1" }));
+    const box = screen.getByRole("textbox", { name: "Display name · m1" });
+    fireEvent.change(box, { target: { value: "Fast" } });
+    // The write re-renders the form; it must leave this input, and the caret
+    // in it, where they are.
+    expect(document.activeElement).toBe(box);
+
+    // Nothing confirmed the edit — no blur, no Enter. The switch unmounts the
+    // table the input sits in, so only the draft can still hold the text.
+    openSection("General");
+    expect(
+      screen.queryByRole("textbox", { name: "Display name · m1" }),
+    ).toBeNull();
+    openSection("Models");
+
+    expect(
+      screen.getByRole("button", { name: "Display name · m1" }).textContent,
+    ).toBe("Fast");
+    expect(screen.getByText("1 changed")).toBeTruthy();
+
+    // The unconfirmed name counts as an unsaved change like any other: it
+    // holds a provider switch until the draft is discarded.
+    clickRow("Second");
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(
+      screen.getByRole("button", { name: "Display name · m1" }).textContent,
+    ).toBe("Fast");
+  });
+
   it("stays on the section and the open model across a save", async () => {
     updateProviderMock.mockImplementation(({ id, provider }) => {
       const saved: Provider = { ...provider, id };
@@ -715,6 +750,15 @@ describe("dirty guard", () => {
       "disabled",
       true,
     );
+
+    // The response landed in the session the discard left behind, so a later
+    // save carries the stored flag instead of the pre-toggle one.
+    fireEvent.change(nameField(), { target: { value: "Renamed" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(updateProviderMock).toHaveBeenCalledTimes(2);
+    });
+    expect(updateProviderMock.mock.calls[1]?.[0]?.provider.enabled).toBe(false);
   });
 
   it("toggles the edited provider from the form's own copy of it", async () => {
@@ -760,6 +804,173 @@ describe("dirty guard", () => {
       expect.anything(),
     );
     expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+});
+
+describe("toggle response ownership", () => {
+  it("keeps a landing toggle out of the provider opened while it ran", async () => {
+    let finishToggle: () => void = () => {
+      throw new Error("No toggle pending");
+    };
+    updateProviderMock
+      .mockImplementationOnce(
+        ({ id, provider }) =>
+          new Promise<Provider>((resolve) => {
+            finishToggle = () => {
+              resolve({ ...provider, id });
+            };
+          }),
+      )
+      .mockImplementation(({ id, provider }) =>
+        Promise.resolve({ ...provider, id }),
+      );
+    const gateway: Provider = { ...STORED, enabled: true };
+    const second: Provider = { ...OTHER, enabled: true };
+    await renderPage([gateway, second], "Gateway");
+    clickRow("Gateway");
+
+    fireEvent.click(screen.getByRole("switch", { name: "Gateway" }));
+    await waitFor(() => expect(updateProviderMock).toHaveBeenCalledTimes(1));
+
+    // The draft is clean, so the write in flight holds nothing: the user is
+    // free to move on to the other provider.
+    clickRow("Second");
+    expect(nameField()).toHaveProperty("value", "Second");
+
+    await act(async () => {
+      finishToggle();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("switch", { name: "Second" })).toHaveProperty(
+        "disabled",
+        false,
+      );
+    });
+
+    // The response belonged to the session that started it. The provider now
+    // on screen keeps its own stored flag, all the way into the next save.
+    fireEvent.change(nameField(), { target: { value: "Renamed second" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateProviderMock).toHaveBeenCalledTimes(2));
+    const posted = updateProviderMock.mock.calls[1]?.[0];
+    expect(posted?.id).toBe("p2");
+    expect(posted?.provider.enabled).toBe(true);
+    expect(posted?.provider.name).toBe("Renamed second");
+  });
+});
+
+describe("create completion ownership", () => {
+  // Each create hangs until the test resolves it: the assertions are about
+  // what a completion does to a session the user moved on to while it ran.
+  let finishCreate: () => void = () => {
+    throw new Error("No create pending");
+  };
+
+  function pendCreate(): void {
+    createProviderMock.mockImplementation(
+      ({ provider }) =>
+        new Promise<Provider>((resolve) => {
+          finishCreate = () => {
+            const saved: Provider = { ...provider, id: "p9" };
+            rows = [...rows, saved];
+            resolve(saved);
+          };
+        }),
+    );
+  }
+
+  // A macrotask turn drains the write, the invalidated read and the
+  // completion callbacks that follow them; the act wrapper then commits their
+  // renders and effects before the assertions below run.
+  async function completeCreate(): Promise<void> {
+    await act(async () => {
+      finishCreate();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    });
+  }
+
+  it("keeps a create out of the session the user moved to while it ran", async () => {
+    pendCreate();
+    await renderPage([STORED, OTHER], "Gateway");
+    clickRow("Gateway");
+
+    await pickNewMenuItem("New blank provider");
+    await waitFor(() => {
+      expect(createProviderMock).toHaveBeenCalledTimes(1);
+    });
+
+    // The draft is clean, so the write in flight holds nothing: the user is
+    // free to open the other provider and edit it.
+    clickRow("Second");
+    fireEvent.change(nameField(), { target: { value: "Edited second" } });
+
+    await completeCreate();
+
+    // The stored row lands in the list, while the provider now on screen
+    // keeps its edit: the completion belonged to the session that started it.
+    await screen.findByRole("button", { name: "Untitled provider" });
+    expect(nameField()).toHaveProperty("value", "Edited second");
+    expect(
+      screen
+        .getByRole("button", { name: "Second" })
+        .getAttribute("aria-current"),
+    ).toBe("true");
+  });
+
+  it("keeps a create out of the session the user left and reopened", async () => {
+    pendCreate();
+    await renderPage([STORED, OTHER], "Gateway");
+    clickRow("Gateway");
+
+    await pickNewMenuItem("New blank provider");
+    await waitFor(() => {
+      expect(createProviderMock).toHaveBeenCalledTimes(1);
+    });
+
+    // Away and back: the id is the same, the session is not.
+    clickRow("Second");
+    clickRow("Gateway");
+
+    await completeCreate();
+
+    await screen.findByRole("button", { name: "Untitled provider" });
+    expect(nameField()).toHaveProperty("value", "Gateway");
+    expect(screen.getByRole("button", { name: "Reset" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+  });
+
+  it("opens a create the confirm-discard flow initiated while it ran", async () => {
+    pendCreate();
+    await renderPage([STORED, OTHER], "Gateway");
+    clickRow("Gateway");
+    fireEvent.change(nameField(), { target: { value: "Edited" } });
+
+    await pickNewMenuItem("New blank provider");
+
+    // The dirty guard parked the create: nothing was written yet.
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(createProviderMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    await waitFor(() => {
+      expect(createProviderMock).toHaveBeenCalledTimes(1);
+    });
+
+    await completeCreate();
+
+    // The request started after the discard reset, so its completion lands in
+    // the session on screen and opens the stored row.
+    await waitFor(() => {
+      expect(nameField()).toHaveProperty("value", "Untitled provider");
+    });
+    expect(
+      screen.getByRole("button", { name: "Delete provider" }),
+    ).toBeTruthy();
   });
 });
 

@@ -1,27 +1,18 @@
 import type { ReactNode } from "react";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { ProviderDraft, ProviderPreset } from "@/types/ipc";
+import type { Provider, ProviderDraft, ProviderPreset } from "@/types/ipc";
 
-import {
-  useCreateProvider,
-  useProviders,
-  useUpdateProvider,
-} from "@/hooks/use-providers";
+import { useCreateProvider, useProviders } from "@/hooks/use-providers";
 
 import { DirtyNotice } from "../components/DirtyNotice";
 import { ProviderCorruptedNotice } from "./components/ProviderCorruptedNotice";
 import { ProviderDraftForm } from "./components/ProviderDraftForm";
 import { ProviderList } from "./components/ProviderList";
 import { ProviderSplitDivider } from "./components/ProviderSplitDivider";
-import {
-  blankCreateDraft,
-  freeProviderName,
-  presetDraft,
-  providerToDraft,
-} from "./draft";
+import { blankCreateDraft, freeProviderName, presetDraft } from "./draft";
 import { type ProviderTarget, useProviderDraft } from "./use-provider-draft";
 
 /**
@@ -74,8 +65,17 @@ export function ProvidersPage({
   const { isLoading, providers } = useProviders();
   const draft = useProviderDraft(providers);
   const create = useCreateProvider();
-  const toggle = useUpdateProvider();
   const [pending, setPending] = useState<null | PendingIntent>(null);
+  const [created, setCreated] = useState<null | {
+    provider: Provider;
+    stamp: number;
+  }>(null);
+  // What the effect below has already decided, by object identity: each
+  // completion is a fresh object, so this is what keeps one completion from
+  // being judged twice across the renders that follow it.
+  const handledCreated = useRef<null | { provider: Provider; stamp: number }>(
+    null,
+  );
   const [listWidth, setListWidth] = useState(LIST_WIDTH_DEFAULT);
   const target = draft.target;
   const isEmptyLibrary = !isLoading && providers.length === 0;
@@ -91,6 +91,20 @@ export function ProvidersPage({
       onNavRequestResolved?.(true);
     }
   }, [draft.isChanged, isNavRequested, onNavRequestResolved]);
+
+  // A create completion is judged on the freshest render rather than inside
+  // the write's own closure: the stamp it carries proves the session that
+  // started it is still live, while a switched-away, re-opened or edited
+  // session keeps what it has (the stored row is in the list by then). `draft`
+  // changes identity every render, so the handled marker is what confines this
+  // effect to one decision per completion.
+  useEffect(() => {
+    if (created === null || handledCreated.current === created) {
+      return;
+    }
+    handledCreated.current = created;
+    draft.adoptCreated(created.provider, created.stamp);
+  }, [created, draft]);
 
   function runIntent(intent: PendingIntent): void {
     switch (intent.kind) {
@@ -112,23 +126,8 @@ export function ProvidersPage({
       case "select":
         draft.select(intent.id);
         return;
-      case "toggle": {
-        const item = providers.find((candidate) => candidate.id === intent.id);
-        if (item === undefined || "corrupted" in item) {
-          return;
-        }
-        // The quick toggle is a full-replace write, so it must carry the whole
-        // stored document: the form's baseline when it holds this provider,
-        // the cached row otherwise.
-        toggle.reset();
-        const stored = draft.baselineFor(item.id) ?? providerToDraft(item);
-        toggle.mutate(
-          { id: item.id, provider: { ...stored, enabled: intent.enabled } },
-          {
-            onSuccess: () => draft.applyStoredEnabled(item.id, intent.enabled),
-          },
-        );
-      }
+      case "toggle":
+        draft.toggleEnabled(intent.id, intent.enabled);
     }
   }
 
@@ -168,15 +167,22 @@ export function ProvidersPage({
     runIntent(intent);
   }
 
-  /** Stores a create payload and opens the stored row it returns. */
+  /**
+   * Stores a create payload; the stored row is opened only when the
+   * completion still lands in the session the write started from.
+   */
   function createStored(provider: ProviderDraft): void {
     if (create.isPending) {
       return;
     }
+    // Read from the ref, not from this render: a create parked behind the
+    // dirty guard runs as the tail of the confirm-discard flow, and the
+    // completion is judged against the session that follows that reset.
+    const stamp = draft.sessionStamp();
     create.reset();
     create.mutate(
       { provider },
-      { onSuccess: (saved) => draft.adoptCreated(saved) },
+      { onSuccess: (saved) => setCreated({ provider: saved, stamp }) },
     );
   }
 
@@ -233,9 +239,9 @@ export function ProvidersPage({
       >
         <div className="h-[34px] shrink-0" data-tauri-drag-region />
         <ProviderList
-          actionError={create.error ?? toggle.error}
+          actionError={create.error ?? draft.toggleError}
           activeId={targetRowId(target)}
-          isToggling={toggle.isPending}
+          isToggling={draft.isToggling}
           onNewBlank={() => requestIntent({ kind: "blank" })}
           onNewPreset={(preset) => requestIntent({ kind: "preset", preset })}
           onSelect={(id) => requestIntent({ id, kind: "select" })}
