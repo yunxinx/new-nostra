@@ -127,8 +127,7 @@ beforeEach(() => {
         };
         sessions.push(session);
         sessionEntries.push(entry);
-        const created: CreatedSession = { entry, session };
-        return created;
+        return { entry, session } satisfies CreatedSession;
       }
       case "list_sessions": {
         const { params } = payload as {
