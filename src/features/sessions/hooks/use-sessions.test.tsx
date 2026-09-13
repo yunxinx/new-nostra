@@ -120,8 +120,7 @@ beforeEach(() => {
         throw { code: "db", message: "list failed" } satisfies AppError;
       }
       if (deferredList) {
-        const deferred = deferredList;
-        return new Promise<SessionPage>(deferred);
+        return new Promise<SessionPage>(deferredList);
       }
       const { params } = payload as { params: ListSessionsParams };
       return listPage(params);
