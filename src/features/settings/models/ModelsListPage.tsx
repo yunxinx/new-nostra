@@ -279,6 +279,7 @@ export function ModelsListPage({
               </TableRow>
               {group.map((row) => (
                 <ModelListRow
+                  isDeleting={batch.isDeleting}
                   isSelected={selection.isSelected(rowKey(row))}
                   key={rowKey(row)}
                   model={row.model}
@@ -345,12 +346,14 @@ export function ModelsListPage({
 }
 
 function ModelListRow({
+  isDeleting,
   isSelected,
   model,
   onEdit,
   onOpenCard,
   onToggle,
 }: {
+  isDeleting: boolean;
   isSelected: boolean;
   model: ModelEntry;
   onEdit: () => void;
@@ -396,10 +399,15 @@ function ModelListRow({
       <PriceCell cost={model.cost} />
       <TableCell>
         <div className="flex items-center justify-center gap-0.5">
+          {/* The editor snapshots the whole provider document and saves it
+              back wholesale, so it must not open over a delete in flight: the
+              snapshot still carries the model the write just removed, and
+              saving would put it back. */}
           <IconButton
             aria-label={t("settings.models.editModel", {
               model: modelDisplayName(model),
             })}
+            disabled={isDeleting}
             onClick={onEdit}
             size="icon-xs"
             type="button"

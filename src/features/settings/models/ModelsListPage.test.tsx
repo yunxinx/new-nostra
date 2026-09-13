@@ -18,7 +18,7 @@ import {
   vi,
 } from "vitest";
 
-import type { Provider, ProviderListItem } from "@/types/ipc";
+import type { Provider, ProviderListItem, Providers } from "@/types/ipc";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { initI18n } from "@/lib/i18n";
@@ -41,6 +41,7 @@ vi.mock("@/lib/ipc/providers", () => ({
 const listProviderPresetsMock = vi.mocked(listProviderPresets);
 const listProvidersMock = vi.mocked(listProviders);
 const resolveCompatMock = vi.mocked(resolveCompat);
+const updateProviderMock = vi.mocked(updateProvider);
 
 // Radix Select measures its panel through a ResizeObserver and consults
 // pointer capture while tracking the trigger; jsdom implements neither.
@@ -456,6 +457,66 @@ describe("aggregate model list filters", () => {
     expect(groupNames()).toEqual(["Second1 model"]);
     expect(modelRows()).toHaveLength(1);
   });
+});
+
+it("locks the row editor from the delete's write until its refresh lands", async () => {
+  await renderPage([GATEWAY], 2);
+  const afterDelete: Provider = {
+    ...GATEWAY,
+    models: (GATEWAY.models ?? []).filter(
+      (model) => model.id !== "draft-model",
+    ),
+  };
+  // The directory read the invalidation issues is held open: React Query
+  // keeps the mutation pending until the onSuccess that awaits the refresh
+  // completes, so this is the window where the write has landed while the
+  // list still holds the pre-delete snapshot an editor would save back.
+  let releaseRefresh: ((page: Providers) => void) | undefined;
+  listProvidersMock.mockImplementationOnce(
+    () =>
+      new Promise<Providers>((resolve) => {
+        releaseRefresh = resolve;
+      }),
+  );
+  updateProviderMock.mockImplementation(({ id, provider }) =>
+    Promise.resolve({ ...provider, id }),
+  );
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "draft-model" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove model" }));
+  await waitFor(() => expect(releaseRefresh).toBeDefined());
+  expect(updateProviderMock).toHaveBeenCalledTimes(1);
+
+  const editButton = screen.getByRole("button", { name: "Edit GPT-4o" });
+  expect(editButton).toHaveProperty("disabled", true);
+  fireEvent.click(editButton);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  // The card holds a read-only view, so it stays open through the window.
+  expect(
+    screen.getByRole("button", { name: "View the card of GPT-4o" }),
+  ).toHaveProperty("disabled", false);
+
+  releaseRefresh?.({ providers: [afterDelete] });
+  listProvidersMock.mockResolvedValue({ providers: [afterDelete] });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Edit GPT-4o" })).toHaveProperty(
+      "disabled",
+      false,
+    ),
+  );
+  expect(screen.queryByRole("checkbox", { name: "draft-model" })).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit GPT-4o" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Display name" }), {
+    target: { value: "GPT-4o edited" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(updateProviderMock).toHaveBeenCalledTimes(2));
+
+  // The saved document is the refreshed one: the removed model is gone and
+  // the save does not put it back.
+  const submitted = updateProviderMock.mock.calls[1]?.[0].provider;
+  expect(submitted?.models?.map((model) => model.id)).toEqual(["gpt-4o"]);
 });
 
 it("keeps failed deletions selected and reports which provider failed", async () => {
