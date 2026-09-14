@@ -1,9 +1,22 @@
 import { cn } from "cn";
-import { Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  GripVertical,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { ProviderListItem, UnifiedModel } from "@/types/ipc";
+import type {
+  ProviderListItem,
+  UnifiedMember,
+  UnifiedModel,
+} from "@/types/ipc";
 
 import { BulkActionBar } from "@/components/common/BulkActionBar";
 import { DataTablePanel } from "@/components/common/DataTablePanel";
@@ -39,11 +52,14 @@ import {
   useDeleteUnifiedModel,
   useProviders,
   useUnifiedModels,
+  useUpdateUnifiedModel,
 } from "@/hooks/use-providers";
 import { unifiedMemberParts } from "@/lib/model-catalog";
 
 import { UnifiedModelEditor } from "./components/UnifiedModelEditor";
+import { memberKey, moveMemberTo } from "./unified-draft";
 import { useBatchDelete } from "./use-batch-delete";
+import { dropEdgeOf, useMemberDrag } from "./use-member-drag";
 
 /** Which surface the page shows: the list, or the editor of one aggregate. */
 type EditorState = { id: null | string; kind: "editor" } | { kind: "list" };
@@ -78,6 +94,7 @@ export function UnifiedModelsPage({
   const selection = useRowSelection();
   const batch = useBatchDelete();
   const remove = useDeleteUnifiedModel();
+  const reorder = useUpdateUnifiedModel();
   const [editor, setEditor] = useState<EditorState>({ kind: "list" });
   const [search, setSearch] = useState("");
 
@@ -119,6 +136,21 @@ export function UnifiedModelsPage({
         })),
       (keys) => selection.setMany(keys, false),
     );
+  }
+
+  /**
+   * Stores one aggregate's members in the order a drag left them: the whole
+   * list is written, because the order is the list.
+   */
+  function reorderMembers(
+    unified: UnifiedModel,
+    members: UnifiedMember[],
+  ): void {
+    if (reorder.isPending) {
+      return;
+    }
+    reorder.reset();
+    reorder.mutate({ id: unified.id, unified: { id: unified.id, members } });
   }
 
   if (editor.kind === "editor") {
@@ -190,6 +222,11 @@ export function UnifiedModelsPage({
           })}
         </p>
       )}
+      {reorder.error !== null && (
+        <p className="text-destructive py-2 text-xs" role="alert">
+          {t(`errors.${reorder.error.code}`)}
+        </p>
+      )}
       <DataTablePanel
         columns={COLUMNS}
         header={
@@ -214,7 +251,7 @@ export function UnifiedModelsPage({
                 />
               </TableHead>
               <TableHead>{t("settings.models.unifiedId")}</TableHead>
-              <TableHead>{t("settings.models.member")}</TableHead>
+              <TableHead>{t("settings.models.routeOrder")}</TableHead>
               {/* Editing and deleting get a column each: sharing one column
                   puts a destructive click one small gap away from the click
                   that opens the editor. */}
@@ -238,8 +275,10 @@ export function UnifiedModelsPage({
               />
             ) : (
               <UnifiedRow
+                isReorderable={!isNavRequested && !reorder.isPending}
                 key={item.id}
                 onEdit={() => setEditor({ id: item.id, kind: "editor" })}
+                onReorder={(members) => reorderMembers(item, members)}
                 providers={providers}
                 selection={selection}
                 unified={item}
@@ -355,6 +394,137 @@ function DeleteUnifiedButton({ unifiedId }: { unifiedId: string }) {
   );
 }
 
+/**
+ * One aggregate's members in the order they are attempted, one item per
+ * member: the disc is its place in the attempt order and the badge names whose
+ * model it is. A drag moves an item to the slot it was dropped on and the rest
+ * shift around it; the grip at the item's head is the only part that starts
+ * one, so the text and the badge keep scrolling the list on touch, where a
+ * `touch-none` item would be a stretch nothing can move.
+ */
+function RouteOrderCell({
+  isReorderable,
+  members,
+  onReorder,
+  providers,
+}: {
+  isReorderable: boolean;
+  members: UnifiedMember[];
+  onReorder: (members: UnifiedMember[]) => void;
+  providers: ProviderListItem[];
+}) {
+  const { t } = useTranslation();
+  const drag = useMemberDrag({
+    attribute: "data-route-index",
+    isDisabled: !isReorderable,
+    onDrop: (from, to) => onReorder(moveMemberTo(members, from, to)),
+  });
+  // Two columns read down each one: an attempt order is a sequence, and a
+  // reader follows a sequence to its end before starting the next column.
+  const rowsPerColumn = Math.ceil(members.length / 2);
+  const isTwoColumn = members.length >= MEMBER_TWO_COLUMNS_FROM;
+
+  if (members.length === 0) {
+    return (
+      <span className="text-muted-foreground text-xs">
+        {t("settings.models.membersEmpty")}
+      </span>
+    );
+  }
+  return (
+    <ol
+      className={cn(
+        "grid min-w-0 gap-y-1",
+        isTwoColumn && "grid-flow-col grid-cols-2 gap-x-4",
+      )}
+      style={
+        isTwoColumn
+          ? { gridTemplateRows: `repeat(${String(rowsPerColumn)}, auto)` }
+          : undefined
+      }
+    >
+      {members.map((member, position) => {
+        const parts = unifiedMemberParts(member, providers);
+        const isDragging = drag.from === position;
+        const dropEdge = dropEdgeOf(drag, position);
+        return (
+          <li
+            // Attempt order, as an outlined disc: a ring reads as a step
+            // number without competing with the badge beside it for the eye,
+            // which a solid fill would. The negative margin and the padding
+            // that cancels it keep the item on the line it belongs to while
+            // giving its own highlight a little room.
+            className={cn(
+              "-mx-1 flex min-w-0 items-center gap-1.5 rounded-[4px] px-1 text-sm",
+              isDragging && "opacity-60",
+              // The line a member would land on: the neighbours shift towards
+              // the gap the drag left, so the same edge rule as the editor's
+              // order table holds here.
+              dropEdge === "before" &&
+                "shadow-[inset_0_2px_0_0_var(--primary)]",
+              dropEdge === "after" &&
+                "shadow-[inset_0_-2px_0_0_var(--primary)]",
+            )}
+            data-route-index={position}
+            key={memberKey(member)}
+          >
+            <button
+              aria-label={t("settings.models.dragMember")}
+              className={cn(
+                "text-muted-foreground focus-visible:ring-ring/50 flex size-6 shrink-0 touch-none items-center justify-center rounded-[4px] outline-none focus-visible:ring-3",
+                isReorderable
+                  ? "hover:text-foreground cursor-grab active:cursor-grabbing"
+                  : "cursor-default",
+              )}
+              {...drag.handleProps(position)}
+              type="button"
+            >
+              <GripVertical className="size-3.5" />
+            </button>
+            <span className="text-muted-foreground inline-flex size-[18px] shrink-0 items-center justify-center rounded-full border text-xs tabular-nums">
+              {position + 1}
+            </span>
+            <span className="min-w-0 truncate">{parts.model}</span>
+            <Badge className="shrink-0" variant="secondary">
+              {parts.provider}
+            </Badge>
+            {/* The order can be walked from the keyboard as well as dragged:
+                both entries write through the same reorder the drop calls. */}
+            {isReorderable && (
+              <span className="ml-auto flex shrink-0 items-center gap-0.5">
+                <IconButton
+                  aria-label={t("settings.models.moveUp")}
+                  disabled={position === 0}
+                  onClick={() =>
+                    onReorder(moveMemberTo(members, position, position - 1))
+                  }
+                  size="icon-xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <ChevronUp className="size-3" />
+                </IconButton>
+                <IconButton
+                  aria-label={t("settings.models.moveDown")}
+                  disabled={position === members.length - 1}
+                  onClick={() =>
+                    onReorder(moveMemberTo(members, position, position + 1))
+                  }
+                  size="icon-xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <ChevronDown className="size-3" />
+                </IconButton>
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 function SelectionCell({
   id,
   selection,
@@ -374,18 +544,21 @@ function SelectionCell({
 }
 
 function UnifiedRow({
+  isReorderable,
   onEdit,
+  onReorder,
   providers,
   selection,
   unified,
 }: {
+  isReorderable: boolean;
   onEdit: () => void;
+  onReorder: (members: UnifiedMember[]) => void;
   providers: ProviderListItem[];
   selection: RowSelection;
   unified: UnifiedModel;
 }) {
   const { t } = useTranslation();
-  const members = unified.members ?? [];
   return (
     <TableRow>
       <SelectionCell id={unified.id} selection={selection} />
@@ -395,43 +568,12 @@ function UnifiedRow({
         </div>
       </TableCell>
       <TableCell className="min-w-0">
-        {members.length === 0 ? (
-          <span className="text-muted-foreground text-xs">
-            {t("settings.models.membersEmpty")}
-          </span>
-        ) : (
-          // The provider badge sits on the name's right, not on the column's:
-          // it qualifies the model it stands next to, and at the far edge it
-          // reads as a column of its own.
-          <ol
-            className={cn(
-              "grid min-w-0 gap-y-1",
-              members.length >= MEMBER_TWO_COLUMNS_FROM &&
-                "grid-cols-2 gap-x-4",
-            )}
-          >
-            {members.map((member, position) => {
-              const parts = unifiedMemberParts(member, providers);
-              return (
-                <li
-                  className="flex min-w-0 items-center gap-1.5 text-sm"
-                  key={`${member.providerId} ${member.model}`}
-                >
-                  {/* Attempt order, as an outlined disc: a ring reads as a
-                      step number without competing with the badge beside it
-                      for the eye, which a solid fill would. */}
-                  <span className="text-muted-foreground inline-flex size-[18px] shrink-0 items-center justify-center rounded-full border text-xs tabular-nums">
-                    {position + 1}
-                  </span>
-                  <span className="min-w-0 truncate">{parts.model}</span>
-                  <Badge className="shrink-0" variant="secondary">
-                    {parts.provider}
-                  </Badge>
-                </li>
-              );
-            })}
-          </ol>
-        )}
+        <RouteOrderCell
+          isReorderable={isReorderable}
+          members={unified.members ?? []}
+          onReorder={onReorder}
+          providers={providers}
+        />
       </TableCell>
       <TableCell className="w-12">
         <div className="flex justify-center">

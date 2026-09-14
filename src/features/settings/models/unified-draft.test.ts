@@ -6,7 +6,7 @@ import {
   addMember,
   isMember,
   memberKey,
-  moveMember,
+  moveMemberTo,
   removeMember,
 } from "./unified-draft";
 
@@ -44,20 +44,36 @@ describe("isMember", () => {
   });
 });
 
-describe("moveMember", () => {
-  it("swaps a member with its neighbour", () => {
+describe("moveMemberTo", () => {
+  it("moves a member one place up or down, shifting the ones in between", () => {
     const members = [member("p1", "a"), member("p2", "b"), member("p3", "c")];
-    expect(moveMember(members, 0, 1)).toEqual([
+    expect(moveMemberTo(members, 0, 1)).toEqual([
       member("p2", "b"),
       member("p1", "a"),
       member("p3", "c"),
     ]);
+    expect(moveMemberTo(members, 2, 1)).toEqual([
+      member("p1", "a"),
+      member("p3", "c"),
+      member("p2", "b"),
+    ]);
   });
 
-  it("stays unchanged for a move off either end", () => {
+  it("moves a member across several places", () => {
+    const members = [member("p1", "a"), member("p2", "b"), member("p3", "c")];
+    expect(moveMemberTo(members, 2, 0)).toEqual([
+      member("p3", "c"),
+      member("p1", "a"),
+      member("p2", "b"),
+    ]);
+  });
+
+  it("stays unchanged for a move onto itself or off either end", () => {
     const members = [member("p1", "a"), member("p2", "b")];
-    expect(moveMember(members, 0, -1)).toBe(members);
-    expect(moveMember(members, 1, 1)).toBe(members);
+    expect(moveMemberTo(members, 0, 0)).toBe(members);
+    expect(moveMemberTo(members, 0, -1)).toBe(members);
+    expect(moveMemberTo(members, 1, 2)).toBe(members);
+    expect(moveMemberTo(members, 2, 0)).toBe(members);
   });
 });
 

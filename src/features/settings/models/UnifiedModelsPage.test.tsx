@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import {
   afterEach,
@@ -101,8 +102,18 @@ const STORED: UnifiedModel = {
 };
 
 let queryClient: QueryClient;
+// The catalogue the mocked read serves; a write mock updates it, so a refetch
+// that follows a write reflects what the database would hold.
+let storedRows: UnifiedModelListItem[] = [];
+/** The row a drag is over: jsdom has no hit testing of its own. */
+const elementFromPoint = vi.fn<() => Element | null>(() => null);
 
-beforeAll(initI18n);
+beforeAll(() => {
+  initI18n();
+  Element.prototype.hasPointerCapture = () => false;
+  Element.prototype.releasePointerCapture = () => undefined;
+  Element.prototype.setPointerCapture = () => undefined;
+});
 beforeEach(() => {
   queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -113,6 +124,7 @@ beforeEach(() => {
     providers: [GATEWAY, ANTHROPIC],
   });
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
+  document.elementFromPoint = elementFromPoint;
 });
 afterEach(() => {
   cleanup();
@@ -144,6 +156,15 @@ function candidateRow(name: string): HTMLTableRowElement {
 }
 
 /**
+ * The grip of one member item of a route order: the only part of the item a
+ * drag starts from. Both surfaces of the page carry buttons named after the
+ * moves, so every lookup is scoped to the item it belongs to.
+ */
+function gripOf(item: HTMLElement): HTMLElement {
+  return within(item).getByRole("button", { name: "Drag to reorder" });
+}
+
+/**
  * The ordered member rows of the editor's left pane. The table marks them for
  * the drag that reorders them, which is also how a test reads them in order.
  */
@@ -162,7 +183,8 @@ async function renderPage(
   unified: UnifiedModelListItem[],
   settled: string,
 ): Promise<void> {
-  listUnifiedModelsMock.mockResolvedValue(unified);
+  storedRows = unified;
+  listUnifiedModelsMock.mockImplementation(() => Promise.resolve(storedRows));
   render(
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
@@ -188,6 +210,268 @@ describe("unified model list", () => {
     await renderPage([{ id: "empty", members: [] }], "empty");
 
     expect(bodyRows()[0]?.[2]).toBe("No members yet");
+  });
+
+  it("fills the route order down one column before starting the next", async () => {
+    const six = Array.from({ length: 6 }, (_, index) => ({
+      model: `m${String(index)}`,
+      providerId: "p1",
+    }));
+    await renderPage(
+      [
+        { id: "six", members: six },
+        { id: "two", members: STORED.members ?? [] },
+      ],
+      "six",
+    );
+
+    const orderList = (id: string) =>
+      screen.getByText(id).closest("tr")?.querySelector("ol");
+    // Six members are a block to skim: two columns, each read to its end, so
+    // the first three run down the left one.
+    expect(orderList("six")?.className).toContain("grid-flow-col");
+    expect(orderList("six")?.getAttribute("style")).toBe(
+      "grid-template-rows: repeat(3, auto);",
+    );
+    // Two members stay a single column, read top to bottom anyway.
+    expect(orderList("two")?.className).not.toContain("grid-flow-col");
+  });
+
+  it("ignores a drag that ends over another aggregate's order", async () => {
+    await renderPage(
+      [
+        STORED,
+        { id: "other", members: [{ model: "gpt-4o", providerId: "p1" }] },
+      ],
+      "fast",
+    );
+    const items = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-route-index]"),
+    );
+    // The first two items belong to the first aggregate, the third to the next
+    // one: its position means nothing to the list the drag started in.
+    elementFromPoint.mockReturnValue(items[2] ?? null);
+    const drag = gripOf(items[0] ?? document.body);
+    fireEvent.pointerDown(drag, { button: 0, pointerId: 7 });
+    fireEvent.pointerMove(drag, { clientX: 20, clientY: 20, pointerId: 7 });
+
+    // The drag is running — the item it started on is dimmed — and it still
+    // stores nothing.
+    expect(items[0]?.className).toContain("opacity-60");
+    fireEvent.pointerUp(drag, { pointerId: 7 });
+
+    expect(updateUnifiedModelMock).not.toHaveBeenCalled();
+  });
+
+  it("draws the line a dragged member would land on", async () => {
+    await renderPage([STORED], "fast");
+    const items = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-route-index]"),
+    );
+    const [first, second] = items;
+    const drag = gripOf(first ?? document.body);
+
+    // The drag runs from the first member down onto the second.
+    elementFromPoint.mockReturnValue(second ?? null);
+    fireEvent.pointerDown(drag, { button: 0, pointerId: 7 });
+    fireEvent.pointerMove(drag, { clientX: 20, clientY: 20, pointerId: 7 });
+
+    // The dragged member travels down, so it lands after the one it is over:
+    // the line is drawn on that member's lower edge, and the member itself is
+    // dimmed to show which one is moving.
+    expect(second?.className).toContain("inset_0_-2px_0_0_var(--primary)");
+    expect(first?.className).toContain("opacity-60");
+
+    fireEvent.pointerUp(drag, { pointerId: 7 });
+    expect(second?.className).not.toContain("inset_0_");
+  });
+
+  it("ends the drag when another element takes the pointer's capture", async () => {
+    await renderPage([STORED], "fast");
+    const items = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-route-index]"),
+    );
+    const [first, second] = items;
+    const drag = gripOf(first ?? document.body);
+
+    elementFromPoint.mockReturnValue(second ?? null);
+    fireEvent.pointerDown(drag, { button: 0, pointerId: 7 });
+    fireEvent.pointerMove(drag, { clientX: 20, clientY: 20, pointerId: 7 });
+    expect(second?.className).toContain("inset_0_-2px_0_0_var(--primary)");
+
+    // A capture the drag did not give up itself — another element claiming the
+    // same pointer's capture, the loss no `pointercancel` announces — ends the
+    // drag as a release would. The event still arrives only because the handle
+    // is mounted: React listens at the root container, and a handle detached
+    // mid-drag gets the loss fired on the node that left the document, where
+    // no listener of the page can hear it.
+    fireEvent.lostPointerCapture(drag, { pointerId: 7 });
+
+    expect(second?.className).not.toContain("inset_0_");
+    expect(first?.className).not.toContain("opacity-60");
+    fireEvent.pointerUp(drag, { pointerId: 7 });
+    expect(updateUnifiedModelMock).not.toHaveBeenCalled();
+  });
+
+  it("shows no landing line for a point that is over another aggregate", async () => {
+    await renderPage(
+      [
+        STORED,
+        { id: "other", members: [{ model: "gpt-4o", providerId: "p1" }] },
+      ],
+      "fast",
+    );
+    const items = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-route-index]"),
+    );
+    const [first, , other] = items;
+    const drag = gripOf(first ?? document.body);
+
+    elementFromPoint.mockReturnValue(other ?? null);
+    fireEvent.pointerDown(drag, { button: 0, pointerId: 7 });
+    fireEvent.pointerMove(drag, { clientX: 20, clientY: 20, pointerId: 7 });
+
+    // A position means nothing across two lists, so the aggregate the drag
+    // wandered into shows nothing — and neither does the one it left, running
+    // all the while.
+    expect(first?.className).toContain("opacity-60");
+    expect(other?.className).not.toContain("inset_0_");
+    expect(first?.className).not.toContain("inset_0_");
+    fireEvent.pointerUp(drag, { pointerId: 7 });
+    expect(updateUnifiedModelMock).not.toHaveBeenCalled();
+  });
+
+  it("stores the order a member is dropped into", async () => {
+    updateUnifiedModelMock.mockImplementation(({ id, unified }) => {
+      storedRows = storedRows.map((item) =>
+        !("corrupted" in item) && item.id === id ? unified : item,
+      );
+      return Promise.resolve(unified);
+    });
+    await renderPage([STORED], "fast");
+    const items = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-route-index]"),
+    );
+    const [first, second] = items;
+    const drag = gripOf(first ?? document.body);
+
+    // The drag starts on the first member and ends over the second.
+    elementFromPoint.mockReturnValue(second ?? null);
+    fireEvent.pointerDown(drag, { button: 0, pointerId: 7 });
+    fireEvent.pointerMove(drag, { clientX: 20, clientY: 20, pointerId: 7 });
+    fireEvent.pointerUp(drag, { pointerId: 7 });
+
+    await waitFor(() =>
+      expect(updateUnifiedModelMock).toHaveBeenCalledTimes(1),
+    );
+    expect(updateUnifiedModelMock.mock.calls[0]?.[0]).toEqual({
+      id: "fast",
+      unified: {
+        id: "fast",
+        members: [
+          { model: "claude-sonnet", providerId: "p2" },
+          { model: "gpt-4o-mini", providerId: "p1" },
+        ],
+      },
+    });
+    // The stored order is what the row shows, without waiting for a re-read.
+    await waitFor(() => {
+      expect(bodyRows()[0]?.[2]).toBe(
+        "1claude-sonnetAnthropic2gpt-4o-miniGateway",
+      );
+    });
+  });
+
+  it("reorders members from the keyboard through the row's move buttons", async () => {
+    updateUnifiedModelMock.mockImplementation(({ id, unified }) => {
+      storedRows = storedRows.map((item) =>
+        !("corrupted" in item) && item.id === id ? unified : item,
+      );
+      return Promise.resolve(unified);
+    });
+    await renderPage([STORED], "fast");
+    const items = () =>
+      Array.from(document.querySelectorAll<HTMLElement>("[data-route-index]"));
+    const moveButton = (item: HTMLElement | undefined, name: string) =>
+      within(item ?? document.body).getByRole("button", { name });
+
+    // The ends are where the moves run out: nothing above the first item,
+    // nothing below the last.
+    expect(moveButton(items()[0], "Move member up")).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(moveButton(items()[1], "Move member down")).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(moveButton(items()[0], "Move member down")).toHaveProperty(
+      "disabled",
+      false,
+    );
+
+    fireEvent.click(moveButton(items()[0], "Move member down"));
+
+    await waitFor(() =>
+      expect(updateUnifiedModelMock).toHaveBeenCalledTimes(1),
+    );
+    // The button writes the very order a drop writes: the whole member list,
+    // in the order it now stands in.
+    expect(updateUnifiedModelMock.mock.calls[0]?.[0]).toEqual({
+      id: "fast",
+      unified: {
+        id: "fast",
+        members: [
+          { model: "claude-sonnet", providerId: "p2" },
+          { model: "gpt-4o-mini", providerId: "p1" },
+        ],
+      },
+    });
+    await waitFor(() => {
+      expect(bodyRows()[0]?.[2]).toBe(
+        "1claude-sonnetAnthropic2gpt-4o-miniGateway",
+      );
+    });
+
+    // The other direction walks the order back.
+    fireEvent.click(moveButton(items()[1], "Move member up"));
+
+    await waitFor(() =>
+      expect(updateUnifiedModelMock).toHaveBeenCalledTimes(2),
+    );
+    expect(updateUnifiedModelMock.mock.calls[1]?.[0]).toEqual({
+      id: "fast",
+      unified: {
+        id: "fast",
+        members: [
+          { model: "gpt-4o-mini", providerId: "p1" },
+          { model: "claude-sonnet", providerId: "p2" },
+        ],
+      },
+    });
+    await waitFor(() => {
+      expect(bodyRows()[0]?.[2]).toBe(
+        "1gpt-4o-miniGateway2claude-sonnetAnthropic",
+      );
+    });
+  });
+
+  it("leaves the pointer drag on the grip so the item still scrolls", async () => {
+    await renderPage([STORED], "fast");
+    const items = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-route-index]"),
+    );
+    const item = items[0] ?? document.body;
+    const grip = gripOf(item);
+
+    // The grip alone holds the pointer: the item and the text in it keep the
+    // touch scrolling that a `touch-none` stretch of the row would take away.
+    expect(grip.className).toContain("touch-none");
+    expect(grip.className).toContain("cursor-grab");
+    expect(item.className).not.toContain("touch-none");
+    expect(within(item).getByText("gpt-4o-mini").className).not.toContain(
+      "touch-none",
+    );
   });
 
   it("offers only a delete on a corrupted aggregate", async () => {

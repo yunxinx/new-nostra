@@ -167,8 +167,8 @@ function openModel(model: string): void {
 }
 
 /**
- * Switches the open provider's detail to one of its three sections. Radix
- * tabs activate on mouse down, not on click.
+ * Switches a tab strip — the detail's own three sections or the open model's —
+ * to the named tab. Radix tabs activate on mouse down, not on click.
  */
 function openSection(name: string): void {
   fireEvent.mouseDown(screen.getByRole("tab", { name }), { button: 0 });
@@ -192,6 +192,7 @@ function removeModelRow(row: number): void {
 async function renderPage(
   initial: ProviderListItem[],
   firstRowName: string,
+  { reactStrictMode = false } = {},
 ): Promise<void> {
   rows = initial;
   listProvidersMock.mockImplementation(() =>
@@ -203,8 +204,14 @@ async function renderPage(
         <ProvidersPage />
       </TooltipProvider>
     </QueryClientProvider>,
+    { reactStrictMode },
   );
   await screen.findByRole("button", { name: firstRowName });
+}
+
+/** Which segment of a strip is the selected one. */
+function sectionSelected(name: string): null | string {
+  return screen.getByRole("tab", { name }).getAttribute("aria-selected");
 }
 
 describe("provider detail prefill", () => {
@@ -440,6 +447,69 @@ describe("model directory on the provider page", () => {
     ],
   };
 
+  it("takes the open model's compat restore into the footer between Reset and Save", async () => {
+    await renderPage([SECOND_MODEL], "Gateway");
+    clickRow("Gateway");
+    openModel("m1");
+    expect(
+      screen.queryByRole("button", { name: "Restore inherited settings" }),
+    ).toBeNull();
+
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Compatibility" }), {
+      button: 0,
+    });
+
+    const restore = await screen.findByRole("button", {
+      name: "Restore inherited settings",
+    });
+    // The pane itself holds no copy: the one control stands in the page footer
+    // between the buttons that save the draft it rewrites.
+    expect(
+      screen.getAllByRole("button", { name: "Restore inherited settings" }),
+    ).toHaveLength(1);
+    expect(
+      screen.getByRole("button", { name: "Reset" }).nextElementSibling,
+    ).toBe(restore);
+    expect(restore.nextElementSibling).toBe(
+      screen.getByRole("button", { name: "Save" }),
+    );
+
+    await waitFor(() => expect(restore).toHaveProperty("disabled", false));
+    const isStoreOn = () =>
+      screen
+        .getByRole("switch", { name: "Store parameter" })
+        .getAttribute("aria-checked");
+    expect(isStoreOn()).toBe("true");
+    fireEvent.click(restore);
+    expect(isStoreOn()).toBe("false");
+    expect(updateProviderMock).not.toHaveBeenCalled();
+  });
+
+  it("withdraws the compat restore when the section leaves", async () => {
+    // Rendered under StrictMode: the control is published and withdrawn by
+    // effects, and a double mount is what proves the withdrawal is paired.
+    await renderPage([SECOND_MODEL], "Gateway", { reactStrictMode: true });
+    clickRow("Gateway");
+    openModel("m1");
+    const restore = (): HTMLElement | null =>
+      screen.queryByRole("button", { name: "Restore inherited settings" });
+
+    openSection("Compatibility");
+    expect(
+      await screen.findByRole("button", { name: "Restore inherited settings" }),
+    ).toBeTruthy();
+
+    // The action belongs to the section showing it: leaving that section — for
+    // another one, or for the directory — takes the control away with it.
+    openSection("Identity");
+    expect(restore()).toBeNull();
+
+    openSection("Compatibility");
+    await waitFor(() => expect(restore()).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Models" }));
+    expect(restore()).toBeNull();
+  });
+
   it("submits the stored rows with the keys the editor never touches", async () => {
     updateProviderMock.mockImplementation(({ id, provider }) =>
       Promise.resolve({ ...provider, id }),
@@ -512,6 +582,29 @@ describe("model directory on the provider page", () => {
     expect(updateProviderMock).not.toHaveBeenCalled();
   });
 
+  it("opens every model on its first section", async () => {
+    await renderPage([SECOND_MODEL], "Gateway");
+    clickRow("Gateway");
+
+    openModel("m1");
+    openSection("Pricing");
+    expect(sectionSelected("Pricing")).toBe("true");
+
+    // Back to the directory and into the other model: the section the first
+    // model was left on is not where the second one opens.
+    fireEvent.click(screen.getByRole("button", { name: "Models" }));
+    openModel("m2");
+    expect(sectionSelected("Identity")).toBe("true");
+    expect(sectionSelected("Pricing")).toBe("false");
+
+    // Leaving the models section and coming back opens the editor again, so
+    // the same model is read from its first section too.
+    openSection("Pricing");
+    openSection("Advanced");
+    openSection("Models");
+    expect(sectionSelected("Identity")).toBe("true");
+  });
+
   it("shows the price error and writes nothing when a peak window is malformed", async () => {
     updateProviderMock.mockImplementation(({ id, provider }) =>
       Promise.resolve({ ...provider, id }),
@@ -571,6 +664,23 @@ describe("model directory on the provider page", () => {
       "value",
       "m1",
     );
+  });
+
+  it("keeps the open section across a re-baseline", async () => {
+    await renderPage([STORED], "Gateway");
+    clickRow("Gateway");
+
+    openModel("m1");
+    fireEvent.change(screen.getByRole("textbox", { name: "Model ID" }), {
+      target: { value: "m9" },
+    });
+    openSection("Pricing");
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    // The re-baseline re-keys the fields under the editor, not the editor's
+    // own section: the user keeps reading where they were.
+    expect(sectionSelected("Pricing")).toBe("true");
+    expect(sectionSelected("Identity")).toBe("false");
   });
 });
 

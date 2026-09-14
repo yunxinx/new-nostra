@@ -23,27 +23,12 @@ export function memberKey(member: UnifiedMember): string {
   return `${member.providerId}\u0000${member.model}`;
 }
 
-/** Swaps a member with its neighbour; a move off either end is a no-op. */
-export function moveMember(
-  members: UnifiedMember[],
-  index: number,
-  offset: -1 | 1,
-): UnifiedMember[] {
-  const target = index + offset;
-  const row = members[index];
-  const neighbour = members[target];
-  if (row === undefined || neighbour === undefined) {
-    return members;
-  }
-  const next = [...members];
-  next[index] = neighbour;
-  next[target] = row;
-  return next;
-}
-
 /**
  * Moves one member to another position, shifting the ones in between. A move
- * onto itself or off either end leaves the list alone.
+ * onto itself or off either end leaves the list alone: walking the order one
+ * step at a time lands off an end at the first and the last row, and the
+ * bounds are checked here rather than left to `splice`, which would read a
+ * negative target as a position from the end.
  */
 export function moveMemberTo(
   members: UnifiedMember[],
@@ -51,7 +36,7 @@ export function moveMemberTo(
   to: number,
 ): UnifiedMember[] {
   const row = members[from];
-  if (row === undefined || from === to) {
+  if (row === undefined || to < 0 || to >= members.length || from === to) {
     return members;
   }
   const next = [...members];

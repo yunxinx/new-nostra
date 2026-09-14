@@ -9,6 +9,12 @@
 // recorded modality.
 let lastInputWasPointer = false;
 
+// Whether the window's most recent input came from the pointer. Callers that
+// return focus by hand read it to skip a return only a keyboard user wants.
+export function isPointerModality(): boolean {
+  return lastInputWasPointer;
+}
+
 // Wraps an onCloseAutoFocus handler so pointer-initiated closes drop Radix's
 // focus return. A caller-provided handler runs after the guard.
 export function suppressPointerFocusReturn(

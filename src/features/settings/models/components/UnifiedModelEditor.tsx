@@ -1,5 +1,3 @@
-import type { PointerEvent as ReactPointerEvent } from "react";
-
 import { cn } from "cn";
 import {
   ChevronDown,
@@ -9,7 +7,7 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -66,10 +64,10 @@ import {
   addMember,
   isMember,
   memberKey,
-  moveMember,
   moveMemberTo,
   removeMember,
 } from "../unified-draft";
+import { dropEdgeOf, useMemberDrag } from "../use-member-drag";
 
 /** One width per column of the member-order table. */
 const MEMBER_COLUMNS = ["w-8", "w-8", undefined, "w-24"];
@@ -242,7 +240,7 @@ export function UnifiedModelEditor({
             while its halves are level. */}
           <section className="flex min-h-0 min-w-0 flex-col gap-1.5">
             <div className="flex h-8 items-center gap-2">
-              <h3 className="text-sm">{t("settings.models.memberOrder")}</h3>
+              <h3 className="text-sm">{t("settings.models.routeOrder")}</h3>
               {/* The way back stands on the heading's right, next to the thing
                   it restores, rather than before the name it belongs to. */}
               {areMembersChanged && (
@@ -269,7 +267,7 @@ export function UnifiedModelEditor({
           <section className="flex min-h-0 min-w-0 flex-col gap-1.5">
             <div className="flex h-8 min-w-0 items-center gap-2">
               <h3 className="shrink-0 text-sm">
-                {t("settings.models.candidateMembers")}
+                {t("settings.models.candidateModels")}
               </h3>
               <div className="ml-auto flex min-w-0 items-center gap-1.5">
                 <div className="relative w-36 min-w-0">
@@ -514,57 +512,11 @@ function MemberOrderTable({
   providers: ProviderListItem[];
 }) {
   const { t } = useTranslation();
-  // The row being dragged, and the row it would land on. The pointer is
-  // captured by the grip, so the move is tracked on the grip while the target
-  // is resolved from the point under the pointer: a captured pointer sends
-  // every move to the grip, and no other row would see one.
-  const fromRef = useRef<null | number>(null);
-  const [from, setFrom] = useState<null | number>(null);
-  const [to, setTo] = useState<null | number>(null);
-
-  function handlePointerDown(index: number, event: ReactPointerEvent): void {
-    // The drag sweeps the pointer across the row's text, so the selection
-    // anchor it would otherwise extend is dropped before it is set.
-    event.preventDefault();
-    document.getSelection()?.removeAllRanges();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    fromRef.current = index;
-    setFrom(index);
-    setTo(index);
-  }
-
-  function handlePointerMove(event: ReactPointerEvent): void {
-    if (fromRef.current === null) {
-      return;
-    }
-    const element = document.elementFromPoint(event.clientX, event.clientY);
-    const index = element
-      ?.closest("[data-member-row]")
-      ?.getAttribute("data-member-row");
-    if (index !== null && index !== undefined) {
-      setTo(Number(index));
-    }
-  }
-
-  /** Ends the drag on every path out of it: capture released, state dropped. */
-  function releaseDrag(event: ReactPointerEvent): void {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    fromRef.current = null;
-    setFrom(null);
-    setTo(null);
-  }
-
-  function handlePointerUp(event: ReactPointerEvent): void {
-    const start = fromRef.current;
-    const end = to;
-    releaseDrag(event);
-    if (start === null || end === null || start === end) {
-      return;
-    }
-    onChange(moveMemberTo(members, start, end));
-  }
+  // The row being dragged, and the row it would land on.
+  const drag = useMemberDrag({
+    attribute: "data-member-row",
+    onDrop: (from, to) => onChange(moveMemberTo(members, from, to)),
+  });
 
   return (
     <DataTablePanel
@@ -578,7 +530,7 @@ function MemberOrderTable({
             <TableHead className="text-center">
               {t("settings.providers.modelIndex")}
             </TableHead>
-            <TableHead>{t("settings.models.member")}</TableHead>
+            <TableHead>{t("settings.models.model")}</TableHead>
             <TableHead className="text-center">{t("common.actions")}</TableHead>
           </TableRow>
         </TableHeader>
@@ -587,13 +539,8 @@ function MemberOrderTable({
       <TableBody>
         {members.map((member, index) => {
           const parts = unifiedMemberParts(member, providers);
-          const isDragging = from === index;
-          const dropEdge =
-            isDragging || to !== index || from === null
-              ? null
-              : from > index
-                ? "before"
-                : "after";
+          const isDragging = drag.from === index;
+          const dropEdge = dropEdgeOf(drag, index);
           return (
             <TableRow
               // The landing line is drawn on the cells: WebKit paints no
@@ -616,10 +563,7 @@ function MemberOrderTable({
                   <button
                     aria-label={t("settings.models.dragMember")}
                     className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex size-6 cursor-grab touch-none items-center justify-center rounded-[4px] outline-none focus-visible:ring-3 active:cursor-grabbing"
-                    onPointerCancel={releaseDrag}
-                    onPointerDown={(event) => handlePointerDown(index, event)}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={handlePointerUp}
+                    {...drag.handleProps(index)}
                     type="button"
                   >
                     <GripVertical className="size-3.5" />
@@ -647,7 +591,9 @@ function MemberOrderTable({
                   <IconButton
                     aria-label={t("settings.models.moveUp")}
                     disabled={index === 0}
-                    onClick={() => onChange(moveMember(members, index, -1))}
+                    onClick={() =>
+                      onChange(moveMemberTo(members, index, index - 1))
+                    }
                     size="icon-xs"
                     type="button"
                     variant="ghost"
@@ -657,7 +603,9 @@ function MemberOrderTable({
                   <IconButton
                     aria-label={t("settings.models.moveDown")}
                     disabled={index === members.length - 1}
-                    onClick={() => onChange(moveMember(members, index, 1))}
+                    onClick={() =>
+                      onChange(moveMemberTo(members, index, index + 1))
+                    }
                     size="icon-xs"
                     type="button"
                     variant="ghost"

@@ -2,7 +2,7 @@ import { IdCard, Pencil, Search, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { ModelEntry, Protocol, Provider } from "@/types/ipc";
+import type { ModelEntry, Provider } from "@/types/ipc";
 
 import { BulkActionBar } from "@/components/common/BulkActionBar";
 import { DataTablePanel } from "@/components/common/DataTablePanel";
@@ -36,7 +36,7 @@ import {
   useProviders,
   useUpdateProvider,
 } from "@/hooks/use-providers";
-import { presetIdForBaseUrl, protocolMark } from "@/lib/brand-marks";
+import { presetIdForBaseUrl } from "@/lib/brand-marks";
 import {
   type AggregateRow,
   aggregateRows,
@@ -49,6 +49,7 @@ import { providerToDraft } from "../providers/draft";
 import { protocolFamilySchema } from "../schemas/compat";
 import { ModelCardPanel } from "./components/ModelCardPanel";
 import { ModelEditPanel } from "./components/ModelEditPanel";
+import { ProtocolBadge } from "./components/ProtocolBadge";
 import { formatRate, priceSummary } from "./model-pricing";
 import { useBatchDelete } from "./use-batch-delete";
 
@@ -65,7 +66,8 @@ type ModelAction =
       kind: "open";
       panelKind: ModelPanel["kind"];
     }
-  | { keys: string[]; kind: "delete" };
+  | { keys: string[]; kind: "delete" }
+  | { kind: "close" };
 
 interface ModelPanel {
   anchor: HTMLElement;
@@ -180,6 +182,9 @@ export function ModelsListPage({
   function applyAction(action: ModelAction): void {
     setPendingAction(null);
     switch (action.kind) {
+      case "close":
+        setPanel(null);
+        break;
       case "delete":
         setPanel(null);
         removeModels(action.keys);
@@ -199,6 +204,17 @@ export function ModelsListPage({
   }
 
   function requestAction(action: ModelAction): void {
+    if (action.kind === "close") {
+      // The control that opened a panel is the control that closes it, and the
+      // switch is the whole of that click: the panel leaves the anchor alone,
+      // so nothing closes in front of it. A panel with nothing to lose goes on
+      // the spot; an editor holding a draft is asked about first, the way every
+      // other way out of it is.
+      if (isNavRequested) return;
+      if (hasEditor) setPendingAction(action);
+      else setPanel(null);
+      return;
+    }
     if (
       isNavRequested ||
       (batch.isDeleting &&
@@ -211,6 +227,7 @@ export function ModelsListPage({
       panel?.kind === action.panelKind &&
       rowKey(panel.row) === action.key
     ) {
+      requestAction({ kind: "close" });
       return;
     }
     if (hasEditor) setPendingAction(action);
@@ -470,7 +487,13 @@ function ModelListRow({
         ) : (
           <div className="flex flex-wrap gap-1">
             {(model.apis ?? []).map((family) => (
-              <ProtocolBadge family={family} key={family} />
+              <ProtocolBadge
+                family={family}
+                key={family}
+                label={t(`settings.providers.protocolsAbbr.${family}`, {
+                  defaultValue: family,
+                })}
+              />
             ))}
           </div>
         )}
@@ -534,32 +557,38 @@ function PriceCell({ cost }: { cost: ModelEntry["cost"] }) {
           reader goes looking for rather than a flash to be guarded against. */}
       <Tooltip delayDuration={TOOLTIP_PRICE_DELAY_MS}>
         <TooltipTrigger asChild>
-          {/* Inline, so the hover target is the badges and not the width of
-              the whole column: a block-level trigger would answer a hover
-              anywhere in the cell, far from anything that looks like a
-              detail. */}
-          <Button
-            className="h-auto max-w-full cursor-default flex-wrap justify-start gap-1 p-0"
-            size="xs"
-            type="button"
-            variant="ghost"
+          {/* Inline, so the hover target is the badges and nothing else: a
+              wrapping flex container is as wide as the column, so it answers a
+              hover in the empty half of a line — which reads as the whole cell
+              lighting up. An inline box hugs the marks it carries on every
+              line, and the spaces between them are where it may break. */}
+          <span
+            className="focus-visible:ring-ring/50 cursor-default rounded-[4px] outline-none select-none focus-visible:ring-3"
+            role="button"
+            tabIndex={0}
           >
             <Badge className="font-normal" variant="secondary">
               {t("settings.models.usageBased")}
             </Badge>
             {summary.extras.includes("tiered") && (
-              <Badge className="font-normal" variant="outline">
-                {t("settings.models.tiered", {
-                  count: summary.tiers.length,
-                })}
-              </Badge>
+              <>
+                {" "}
+                <Badge className="font-normal" variant="outline">
+                  {t("settings.models.tiered", {
+                    count: summary.tiers.length,
+                  })}
+                </Badge>
+              </>
             )}
             {summary.extras.includes("peak") && (
-              <Badge className="font-normal" variant="outline">
-                {t("settings.providers.modelCostPeak")}
-              </Badge>
+              <>
+                {" "}
+                <Badge className="font-normal" variant="outline">
+                  {t("settings.providers.modelCostPeak")}
+                </Badge>
+              </>
             )}
-          </Button>
+          </span>
         </TooltipTrigger>
         <TooltipContent className="flex max-w-sm flex-col items-start gap-2">
           <RateBlock
@@ -582,29 +611,6 @@ function PriceCell({ cost }: { cost: ModelEntry["cost"] }) {
         </TooltipContent>
       </Tooltip>
     </TableCell>
-  );
-}
-
-/**
- * One protocol a model answers on: the family's mark, then its abbreviation,
- * both in the family's own colour on a wash of it. The colour is what tells
- * the two OpenAI families apart, so an unrecognised family keeps the plain
- * outline badge rather than borrowing a colour that reads as another family.
- */
-function ProtocolBadge({ family }: { family: Protocol }) {
-  const { t } = useTranslation();
-  const mark = protocolMark(family);
-  const abbr = t(`settings.providers.protocolsAbbr.${family}`, {
-    defaultValue: family,
-  });
-  if (mark === undefined) {
-    return <Badge variant="outline">{abbr}</Badge>;
-  }
-  return (
-    <Badge className={mark.wash} variant="outline">
-      <ProtocolIcon family={family} />
-      {abbr}
-    </Badge>
   );
 }
 

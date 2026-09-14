@@ -1,5 +1,6 @@
+import { cn } from "cn";
 import { ChevronLeft } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -50,32 +51,57 @@ import { HeadersEditor } from "./HeadersEditor";
 import { ModelCostEditor } from "./ModelCostEditor";
 import { ModelNumberField } from "./ModelNumberField";
 import { ModelSamplingParams } from "./ModelSamplingParams";
+import { ModelSectionTabs } from "./ModelSectionTabs";
 import { ModelThinkingLevels } from "./ModelThinkingLevels";
 
 const MODALITIES: readonly InputModality[] = ["text", "image"];
-
-const SECTIONS = ["identity", "capability", "pricing", "compat"] as const;
 
 // One width for the identity fields, sized by the base-URL override, the
 // longest value they take, so the column of controls ends on one line.
 const FIELD_WIDTH = "w-72 max-w-full";
 
+// A section pane is the clip boundary of the fields inside it, and a control
+// that reaches the edge loses the outer pixels of its focus ring. The inset
+// widens the box and pads it by the same 4px, so the clip moves out while
+// every row stays exactly where it was.
+const PANE_INSET = "-mx-1 px-1";
+
+/** The compat restore a host places in its footer: state, and the one action. */
+export interface CompatRestoreAction {
+  isDisabled: boolean;
+  restore: () => void;
+}
+
 interface ModelDetailProps {
   baseline?: ModelEntry | undefined;
-  /**
-   * `pane` fills a page of its own and carries the way back to the list;
-   * `panel` sits inside a floating panel, which owns the title and the way
-   * out, so the pane's own header would only repeat them.
-   */
-  chrome?: "pane" | "panel";
   editor: ModelEditorState;
   errors: ModelRowErrors | undefined;
   model: ModelEntry;
-  onBack: () => void;
+  /**
+   * The way back to the directory, and with it the editor's own row: the row
+   * stands for that control. A panel owns the title and the way out instead,
+   * so it passes none and carries no row.
+   */
+  onBack?: () => void;
   onChange: (model: ModelEntry) => void;
+  /**
+   * Publishes the compat restore to the host's footer, where it stands beside
+   * the buttons that save the same draft; null while the compat section is
+   * not the open one. The control is the pane's — the fields it rewrites and
+   * the re-key that drops their unfinished input live here — so the host only
+   * places it.
+   */
+  onCompatRestoreChange?:
+    ((action: CompatRestoreAction | null) => void) | undefined;
   onEditorChange: (editor: ModelEditorState) => void;
   /** The provider draft this model's compat merge resolves against. */
   provider: ProviderDraft;
+  /**
+   * The section on show. The host owns it, because the strip that picks it is
+   * placed by the host — in a pane's own row, in a panel's title bar — and both
+   * read one selection.
+   */
+  section: string;
 }
 
 // One model of the directory, opened from its row. It is a child of the
@@ -85,14 +111,15 @@ interface ModelDetailProps {
 // do, what it costs, and how its protocol has to be bent.
 export function ModelDetail({
   baseline = BLANK_MODEL_ENTRY,
-  chrome = "pane",
   editor,
   errors,
   model,
   onBack,
   onChange,
+  onCompatRestoreChange,
   onEditorChange,
   provider,
+  section,
 }: ModelDetailProps) {
   const { t } = useTranslation();
   // One per scrolling pane: the panes mount as their tab is opened, so each
@@ -115,12 +142,7 @@ export function ModelDetail({
       }));
     };
   }
-  const [section, setSection] = useState<string>(SECTIONS[0]);
   const [requestedFamily, setRequestedFamily] = useState<null | string>(null);
-  const sectionIndex = Math.max(
-    0,
-    SECTIONS.findIndex((entry) => entry === section),
-  );
   const label =
     model.id === "" ? t("settings.providers.modelUntitled") : model.id;
 
@@ -151,6 +173,46 @@ export function ModelDetail({
     0,
     families.findIndex((family) => family === activeFamily),
   );
+  const isCompatOpen = section === "compat" && activeFamily !== undefined;
+  const isRestoreDisabled =
+    fallbacks.isLoading || fallbacks.error !== null || !canRestoreInherited;
+  // The published action reads the drafts as they stand when it runs, so the
+  // closure is refreshed after every render; only the two states above decide
+  // when it is re-published, or a host re-render per keystroke would loop.
+  const restoreRef = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    restoreRef.current = () => {
+      onChange(
+        withModelValue(
+          model,
+          "compat",
+          restoreCompatDefaults(baseline.compat, fallbacks.data),
+        ),
+      );
+      onEditorChange({ ...editor, compatInputs: {} });
+      setRestored((current) => ({
+        ...current,
+        compat: (current.compat ?? 0) + 1,
+      }));
+    };
+  });
+  useEffect(() => {
+    if (onCompatRestoreChange === undefined) {
+      return;
+    }
+    onCompatRestoreChange(
+      isCompatOpen
+        ? {
+            isDisabled: isRestoreDisabled,
+            restore: () => restoreRef.current(),
+          }
+        : null,
+    );
+  }, [isCompatOpen, isRestoreDisabled, onCompatRestoreChange]);
+  // Withdrawing the control on the way out is a cleanup of its own: a state
+  // change inside the section must not read as one, or the host would drop the
+  // button and mount a fresh one for every change of it.
+  useEffect(() => () => onCompatRestoreChange?.(null), [onCompatRestoreChange]);
 
   function handleCompatChange(
     family: ProtocolFamily,
@@ -172,315 +234,274 @@ export function ModelDetail({
       className="flex min-h-0 flex-1 flex-col pb-6"
     >
       <CompatResolutionNotice resolution={fallbacks} />
-      <Tabs
-        className="min-h-0 flex-1 gap-0"
-        onValueChange={setSection}
-        value={section}
-      >
-        {/* One row: the way back, the model it is about, and the sections it
-            holds, so the strip costs no line of its own. */}
+      {/* One row: the way back, the model it is about, and the sections it
+          holds, so the strip costs no line of its own. */}
+      {onBack !== undefined && (
         <div className="flex shrink-0 items-center gap-3 py-2">
-          {chrome === "pane" && (
-            <Button onClick={onBack} size="sm" type="button" variant="outline">
-              <ChevronLeft className="size-3.5" />
-              {t("settings.providers.models")}
-            </Button>
-          )}
+          <Button onClick={onBack} size="sm" type="button" variant="outline">
+            <ChevronLeft className="size-3.5" />
+            {t("settings.providers.models")}
+          </Button>
           {/* The chip is the pane's title, so it carries the weight and the
               height of the button beside it: a shorter, rounder chip reads as
               a tag on the row rather than as the name of what is being
-              edited. A panel names itself and leaves the chip out. */}
-          {chrome === "pane" && (
-            <Badge
-              className="h-7 min-w-0 shrink truncate rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] font-normal"
-              variant="secondary"
-            >
-              {label}
-            </Badge>
-          )}
-          <TabsList
-            className="ml-auto shrink-0"
-            segmentCount={SECTIONS.length}
-            segmentIndex={sectionIndex}
+              edited. */}
+          <Badge
+            className="h-7 min-w-0 shrink truncate rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] font-normal"
+            variant="secondary"
           >
-            {SECTIONS.map((entry) => (
-              <TabsTrigger key={entry} value={entry}>
-                {t(`settings.providers.modelSections.${entry}`)}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+            {label}
+          </Badge>
+          <ModelSectionTabs className="ml-auto shrink-0" section={section} />
         </div>
-        <TabsContent
-          className="min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto overscroll-contain pt-2"
-          ref={identityRef}
-          value="identity"
+      )}
+      <TabsContent
+        className={cn(
+          PANE_INSET,
+          "min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto overscroll-contain pt-2",
+        )}
+        ref={identityRef}
+        value="identity"
+      >
+        <SettingsRow
+          info={t("settings.providers.modelIdDesc")}
+          isInvalid={errors?.id !== undefined}
+          label={t("settings.providers.modelId")}
+          onRevert={revertFor("id")}
         >
-          <SettingsRow
-            info={t("settings.providers.modelIdDesc")}
-            isInvalid={errors?.id !== undefined}
-            label={t("settings.providers.modelId")}
-            onRevert={revertFor("id")}
-          >
-            <Input
-              aria-label={t("settings.providers.modelId")}
-              className={FIELD_WIDTH}
-              onChange={(event) =>
-                onChange(patchModel(model, { id: event.target.value }))
-              }
-              value={model.id}
-            />
-          </SettingsRow>
-          <SettingsRow
-            info={t("settings.providers.modelNameDesc")}
-            isInvalid={errors?.name !== undefined}
-            label={t("settings.providers.modelName")}
-            onRevert={revertFor("name")}
-          >
-            <Input
-              aria-label={t("settings.providers.modelName")}
-              className={FIELD_WIDTH}
-              onChange={(event) =>
-                onChange(
-                  withModelValue(
-                    model,
-                    "name",
-                    optionalText(event.target.value),
-                  ),
-                )
-              }
-              value={model.name ?? ""}
-            />
-          </SettingsRow>
-          <SettingsRow
-            info={t("settings.providers.modelBaseUrlDesc")}
-            isInvalid={errors?.baseUrl !== undefined}
-            label={t("settings.providers.modelBaseUrl")}
-            onRevert={revertFor("baseUrl")}
-          >
-            <Input
-              aria-label={t("settings.providers.modelBaseUrl")}
-              className={FIELD_WIDTH}
-              onChange={(event) =>
-                onChange(
-                  withModelValue(
-                    model,
-                    "baseUrl",
-                    optionalText(event.target.value),
-                  ),
-                )
-              }
-              value={model.baseUrl ?? ""}
-            />
-          </SettingsRow>
-          <HeadersEditor
-            info={t("settings.providers.modelHeadersDesc")}
-            isInvalid={hasFieldError(errors?.headers)}
-            key={restored.headers ?? 0}
-            label={t("settings.providers.modelHeaders")}
-            onChange={(headers) =>
+          <Input
+            aria-label={t("settings.providers.modelId")}
+            className={FIELD_WIDTH}
+            onChange={(event) =>
+              onChange(patchModel(model, { id: event.target.value }))
+            }
+            value={model.id}
+          />
+        </SettingsRow>
+        <SettingsRow
+          info={t("settings.providers.modelNameDesc")}
+          isInvalid={errors?.name !== undefined}
+          label={t("settings.providers.modelName")}
+          onRevert={revertFor("name")}
+        >
+          <Input
+            aria-label={t("settings.providers.modelName")}
+            className={FIELD_WIDTH}
+            onChange={(event) =>
+              onChange(
+                withModelValue(model, "name", optionalText(event.target.value)),
+              )
+            }
+            value={model.name ?? ""}
+          />
+        </SettingsRow>
+        <SettingsRow
+          info={t("settings.providers.modelBaseUrlDesc")}
+          isInvalid={errors?.baseUrl !== undefined}
+          label={t("settings.providers.modelBaseUrl")}
+          onRevert={revertFor("baseUrl")}
+        >
+          <Input
+            aria-label={t("settings.providers.modelBaseUrl")}
+            className={FIELD_WIDTH}
+            onChange={(event) =>
               onChange(
                 withModelValue(
                   model,
-                  "headers",
-                  Object.keys(headers).length > 0 ? headers : undefined,
+                  "baseUrl",
+                  optionalText(event.target.value),
                 ),
               )
             }
-            onRevert={revertFor("headers")}
-            value={model.headers}
+            value={model.baseUrl ?? ""}
           />
-        </TabsContent>
-        <TabsContent
-          className="min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto overscroll-contain pt-2"
-          ref={capabilityRef}
-          value="capability"
+        </SettingsRow>
+        <HeadersEditor
+          info={t("settings.providers.modelHeadersDesc")}
+          isInvalid={hasFieldError(errors?.headers)}
+          key={restored.headers ?? 0}
+          label={t("settings.providers.modelHeaders")}
+          onChange={(headers) =>
+            onChange(
+              withModelValue(
+                model,
+                "headers",
+                Object.keys(headers).length > 0 ? headers : undefined,
+              ),
+            )
+          }
+          onRevert={revertFor("headers")}
+          value={model.headers}
+        />
+      </TabsContent>
+      <TabsContent
+        className={cn(
+          PANE_INSET,
+          "min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto overscroll-contain pt-2",
+        )}
+        ref={capabilityRef}
+        value="capability"
+      >
+        <SettingsRow
+          info={t("settings.providers.modelReasoningDesc")}
+          label={t("settings.providers.modelReasoning")}
+          onRevert={revertFor("reasoning")}
         >
-          <SettingsRow
-            info={t("settings.providers.modelReasoningDesc")}
-            label={t("settings.providers.modelReasoning")}
-            onRevert={revertFor("reasoning")}
-          >
-            <Switch
-              aria-label={t("settings.providers.modelReasoning")}
-              checked={model.reasoning}
-              onCheckedChange={(checked) =>
-                onChange(patchModel(model, { reasoning: checked }))
-              }
-            />
-          </SettingsRow>
-          <SettingsRow
-            info={t("settings.providers.modelInputDesc")}
-            isInvalid={hasFieldError(errors?.input)}
-            label={t("settings.providers.modelInput")}
-            onRevert={revertFor("input")}
-          >
-            <div className="flex items-center gap-4">
-              {MODALITIES.map((modality) => (
-                <label className="flex items-center gap-1.5" key={modality}>
-                  <Checkbox
-                    checked={(model.input ?? []).includes(modality)}
-                    onCheckedChange={() =>
-                      onChange(toggleModality(model, modality))
-                    }
-                  />
-                  <span className="text-sm">
-                    {t(`settings.providers.modalities.${modality}`)}
-                  </span>
-                </label>
-              ))}
-            </div>
-          </SettingsRow>
-          <SettingsRow
-            info={t("settings.providers.modelContextWindowDesc")}
-            isInvalid={errors?.contextWindow !== undefined}
-            label={t("settings.providers.modelContextWindow")}
-            onRevert={revertFor("contextWindow")}
-          >
-            <ModelNumberField
-              ariaLabel={t("settings.providers.modelContextWindow")}
-              className="w-32 tabular-nums"
-              key={restored.contextWindow ?? 0}
-              onChange={(contextWindow) =>
-                onChange(withModelValue(model, "contextWindow", contextWindow))
-              }
-              value={model.contextWindow}
-            />
-          </SettingsRow>
-          <SettingsRow
-            info={t("settings.providers.modelMaxTokensDesc")}
-            isInvalid={errors?.maxTokens !== undefined}
-            label={t("settings.providers.modelMaxTokens")}
-            onRevert={revertFor("maxTokens")}
-          >
-            <ModelNumberField
-              ariaLabel={t("settings.providers.modelMaxTokens")}
-              className="w-32 tabular-nums"
-              key={restored.maxTokens ?? 0}
-              onChange={(maxTokens) =>
-                onChange(withModelValue(model, "maxTokens", maxTokens))
-              }
-              value={model.maxTokens}
-            />
-          </SettingsRow>
-          <SettingsRow
-            info={t("settings.providers.modelThinkingLevelsDesc")}
-            isInvalid={hasFieldError(errors?.thinkingLevelMap)}
-            label={t("settings.providers.modelThinkingLevels")}
-            layout="stacked"
-          >
-            <ModelThinkingLevels
-              baseline={baseline}
-              model={model}
-              onChange={onChange}
-            />
-          </SettingsRow>
-          <ModelSamplingParams
-            info={t("settings.providers.modelSamplingParamsDesc")}
-            isInvalid={hasFieldError(errors?.samplingParams)}
-            key={restored.samplingParams ?? 0}
-            label={t("settings.providers.modelSamplingParams")}
-            onChange={(samplingParams) =>
-              onChange(withModelValue(model, "samplingParams", samplingParams))
+          <Switch
+            aria-label={t("settings.providers.modelReasoning")}
+            checked={model.reasoning}
+            onCheckedChange={(checked) =>
+              onChange(patchModel(model, { reasoning: checked }))
             }
-            onRevert={revertFor("samplingParams")}
-            value={model.samplingParams}
           />
-        </TabsContent>
-        <TabsContent
-          className="min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto overscroll-contain pt-4"
-          ref={pricingRef}
-          value="pricing"
+        </SettingsRow>
+        <SettingsRow
+          info={t("settings.providers.modelInputDesc")}
+          isInvalid={hasFieldError(errors?.input)}
+          label={t("settings.providers.modelInput")}
+          onRevert={revertFor("input")}
         >
-          <ModelCostEditor
-            baseline={baseline.cost}
-            onChange={(cost) => onChange(withModelValue(model, "cost", cost))}
-            onRowsChange={(costRows) => onEditorChange({ ...editor, costRows })}
-            rows={editor.costRows}
+          <div className="flex items-center gap-4">
+            {MODALITIES.map((modality) => (
+              <label className="flex items-center gap-1.5" key={modality}>
+                <Checkbox
+                  checked={(model.input ?? []).includes(modality)}
+                  onCheckedChange={() =>
+                    onChange(toggleModality(model, modality))
+                  }
+                />
+                <span className="text-sm">
+                  {t(`settings.providers.modalities.${modality}`)}
+                </span>
+              </label>
+            ))}
+          </div>
+        </SettingsRow>
+        <SettingsRow
+          info={t("settings.providers.modelContextWindowDesc")}
+          isInvalid={errors?.contextWindow !== undefined}
+          label={t("settings.providers.modelContextWindow")}
+          onRevert={revertFor("contextWindow")}
+        >
+          <ModelNumberField
+            ariaLabel={t("settings.providers.modelContextWindow")}
+            className="w-32 tabular-nums"
+            key={restored.contextWindow ?? 0}
+            onChange={(contextWindow) =>
+              onChange(withModelValue(model, "contextWindow", contextWindow))
+            }
+            value={model.contextWindow}
           />
-          {/* The price editor is a block, not a settings row, so the rejection
-              its fields carry needs a line of its own. */}
-          {hasFieldError(errors?.cost) && (
-            <p className="text-destructive pt-3 text-xs" role="alert">
-              {t("errors.invalid_input")}
-            </p>
-          )}
-        </TabsContent>
-        <TabsContent
-          className="flex min-h-0 flex-1 flex-col pt-4"
-          value="compat"
+        </SettingsRow>
+        <SettingsRow
+          info={t("settings.providers.modelMaxTokensDesc")}
+          isInvalid={errors?.maxTokens !== undefined}
+          label={t("settings.providers.modelMaxTokens")}
+          onRevert={revertFor("maxTokens")}
         >
-          {activeFamily !== undefined && (
-            <Tabs
-              className="min-h-0 flex-1 gap-0"
-              onValueChange={setRequestedFamily}
+          <ModelNumberField
+            ariaLabel={t("settings.providers.modelMaxTokens")}
+            className="w-32 tabular-nums"
+            key={restored.maxTokens ?? 0}
+            onChange={(maxTokens) =>
+              onChange(withModelValue(model, "maxTokens", maxTokens))
+            }
+            value={model.maxTokens}
+          />
+        </SettingsRow>
+        <SettingsRow
+          info={t("settings.providers.modelThinkingLevelsDesc")}
+          isInvalid={hasFieldError(errors?.thinkingLevelMap)}
+          label={t("settings.providers.modelThinkingLevels")}
+          layout="stacked"
+        >
+          <ModelThinkingLevels
+            baseline={baseline}
+            model={model}
+            onChange={onChange}
+          />
+        </SettingsRow>
+        <ModelSamplingParams
+          info={t("settings.providers.modelSamplingParamsDesc")}
+          isInvalid={hasFieldError(errors?.samplingParams)}
+          key={restored.samplingParams ?? 0}
+          label={t("settings.providers.modelSamplingParams")}
+          onChange={(samplingParams) =>
+            onChange(withModelValue(model, "samplingParams", samplingParams))
+          }
+          onRevert={revertFor("samplingParams")}
+          value={model.samplingParams}
+        />
+      </TabsContent>
+      <TabsContent
+        className={cn(
+          PANE_INSET,
+          "min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto overscroll-contain pt-4",
+        )}
+        ref={pricingRef}
+        value="pricing"
+      >
+        <ModelCostEditor
+          baseline={baseline.cost}
+          onChange={(cost) => onChange(withModelValue(model, "cost", cost))}
+          onRowsChange={(costRows) => onEditorChange({ ...editor, costRows })}
+          rows={editor.costRows}
+        />
+        {/* The price editor is a block, not a settings row, so the rejection
+            its fields carry needs a line of its own. */}
+        {hasFieldError(errors?.cost) && (
+          <p className="text-destructive pt-3 text-xs" role="alert">
+            {t("errors.invalid_input")}
+          </p>
+        )}
+      </TabsContent>
+      <TabsContent className="flex min-h-0 flex-1 flex-col pt-4" value="compat">
+        {activeFamily !== undefined && (
+          <Tabs
+            className="min-h-0 flex-1 gap-0"
+            onValueChange={setRequestedFamily}
+            value={activeFamily}
+          >
+            <TabsList
+              className="shrink-0"
+              segmentCount={families.length}
+              segmentIndex={familyIndex}
+            >
+              {families.map((family) => (
+                <TabsTrigger key={family} value={family}>
+                  {t(`settings.providers.protocolsShort.${family}`)}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            <TabsContent
+              className={cn(
+                PANE_INSET,
+                "min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto overscroll-contain pt-2",
+              )}
+              ref={familyRef}
               value={activeFamily}
             >
-              <TabsList
-                className="shrink-0"
-                segmentCount={families.length}
-                segmentIndex={familyIndex}
-              >
-                {families.map((family) => (
-                  <TabsTrigger key={family} value={family}>
-                    {t(`settings.providers.protocolsShort.${family}`)}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-              <TabsContent
-                className="min-h-0 flex-1 scrollbar-none overflow-x-clip overflow-y-auto overscroll-contain pt-2"
-                ref={familyRef}
-                value={activeFamily}
-              >
-                <CompatSection
-                  baseline={overrideRecord(baseline.compat?.[activeFamily])}
-                  bucket={overrideRecord(model.compat?.[activeFamily])}
-                  fallbacks={fallbacks.data[activeFamily]?.values ?? {}}
-                  family={activeFamily}
-                  inputs={editor.compatInputs}
-                  key={restored.compat ?? 0}
-                  layerSource="model"
-                  onFieldChange={(field, value) =>
-                    handleCompatChange(activeFamily, field, value)
-                  }
-                  onInputsChange={(compatInputs) =>
-                    onEditorChange({ ...editor, compatInputs })
-                  }
-                  showHeading={false}
-                  sources={fallbacks.data[activeFamily]?.sources ?? {}}
-                />
-              </TabsContent>
-            </Tabs>
-          )}
-          <div className="flex shrink-0 justify-end pt-3">
-            <Button
-              disabled={
-                fallbacks.isLoading ||
-                fallbacks.error !== null ||
-                !canRestoreInherited
-              }
-              onClick={() => {
-                onChange(
-                  withModelValue(
-                    model,
-                    "compat",
-                    restoreCompatDefaults(baseline.compat, fallbacks.data),
-                  ),
-                );
-                onEditorChange({ ...editor, compatInputs: {} });
-                setRestored((current) => ({
-                  ...current,
-                  compat: (current.compat ?? 0) + 1,
-                }));
-              }}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              {t("settings.providers.restoreInheritedCompat")}
-            </Button>
-          </div>
-        </TabsContent>
-      </Tabs>
+              <CompatSection
+                baseline={overrideRecord(baseline.compat?.[activeFamily])}
+                bucket={overrideRecord(model.compat?.[activeFamily])}
+                fallbacks={fallbacks.data[activeFamily]?.values ?? {}}
+                family={activeFamily}
+                inputs={editor.compatInputs}
+                key={restored.compat ?? 0}
+                layerSource="model"
+                onFieldChange={(field, value) =>
+                  handleCompatChange(activeFamily, field, value)
+                }
+                onInputsChange={(compatInputs) =>
+                  onEditorChange({ ...editor, compatInputs })
+                }
+                showHeading={false}
+                sources={fallbacks.data[activeFamily]?.sources ?? {}}
+              />
+            </TabsContent>
+          </Tabs>
+        )}
+      </TabsContent>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ModelEntry, Provider } from "@/types/ipc";
@@ -6,17 +6,25 @@ import type { ModelEntry, Provider } from "@/types/ipc";
 import { FloatingPanel } from "@/components/common/FloatingPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tabs } from "@/components/ui/tabs";
 import { useUpdateProvider } from "@/hooks/use-providers";
+import { modelDisplayName } from "@/lib/model-catalog";
 
 import { hasInvalidCompatInputs } from "../../components/compat/compat-draft";
 import { DirtyNotice } from "../../components/DirtyNotice";
 import { useDraftGuard } from "../../hooks/use-draft-guard";
-import { ModelDetail } from "../../providers/components/ModelDetail";
+import { CompatRestoreButton } from "../../providers/components/CompatRestoreButton";
+import {
+  type CompatRestoreAction,
+  ModelDetail,
+} from "../../providers/components/ModelDetail";
+import { ModelSectionTabs } from "../../providers/components/ModelSectionTabs";
 import { providerToDraft } from "../../providers/draft";
 import {
   changedModelCount,
   modelEditorState,
 } from "../../providers/model-draft";
+import { MODEL_SECTIONS } from "../../providers/model-sections";
 import { modelEntrySchema } from "../../schemas/provider";
 
 interface ModelEditPanelProps {
@@ -52,9 +60,14 @@ export function ModelEditPanel({
   const isSaving = update.isPending || update.isSuccess;
   const [model, setModel] = useState(target.model);
   const [editor, setEditor] = useState(() => modelEditorState(target.model));
+  // Published by the editor while its compat section is open; the footer holds
+  // it so it stands beside the buttons that save the same row.
+  const [compatRestore, setCompatRestore] =
+    useState<CompatRestoreAction | null>(null);
   const hasInvalidInputs = hasInvalidCompatInputs(editor.compatInputs);
   const changedCount = changedModelCount(target.model, model, editor);
   const isChanged = changedCount > 0;
+  const [section, setSection] = useState<string>(MODEL_SECTIONS[0]);
   const [isRefused, setIsRefused] = useState(false);
   const guard = useDraftGuard({
     isChanged,
@@ -64,8 +77,14 @@ export function ModelEditPanel({
     onNavRequestResolved,
   });
   // The provider document the compat fields resolve against, which is the
-  // stored one: what the panel edits is the row, not the provider.
-  const providerDraft = providerToDraft(target.provider);
+  // stored one: what the panel edits is the row, not the provider. Memoized on
+  // the stored document, because the resolution treats a rebuilt draft as new
+  // input and would re-resolve — and disable its own controls — on every
+  // keystroke in this panel.
+  const providerDraft = useMemo(
+    () => providerToDraft(target.provider),
+    [target.provider],
+  );
 
   useEffect(() => {
     // The parent may have received a switch request while the save refreshed
@@ -91,73 +110,79 @@ export function ModelEditPanel({
   }
 
   return (
-    <FloatingPanel
-      anchor={anchor}
-      footer={
-        <>
-          {isRefused && (
-            <p className="text-destructive text-xs" role="alert">
-              {t("errors.invalid_input")}
-            </p>
-          )}
-          {changedCount > 0 && (
-            <Badge variant="secondary">
-              {t("common.changedCount", { count: changedCount })}
-            </Badge>
-          )}
-          {update.error !== null && (
-            <p
-              className="text-destructive min-w-0 flex-1 truncate text-xs"
-              role="alert"
+    // The tab root stands above both halves of the tab it holds — the strip in
+    // the panel's title bar, the panes in its body — and draws nothing itself:
+    // the panel it holds is portalled out of this element.
+    <Tabs className="contents" onValueChange={setSection} value={section}>
+      <FloatingPanel
+        anchor={anchor}
+        dismissOnOutsidePress
+        footer={
+          <>
+            {isRefused && (
+              <p className="text-destructive text-xs" role="alert">
+                {t("errors.invalid_input")}
+              </p>
+            )}
+            {changedCount > 0 && (
+              <Badge variant="secondary">
+                {t("common.changedCount", { count: changedCount })}
+              </Badge>
+            )}
+            {update.error !== null && (
+              <p
+                className="text-destructive min-w-0 flex-1 truncate text-xs"
+                role="alert"
+              >
+                {t(`errors.${update.error.code}`)}
+              </p>
+            )}
+            <Button
+              disabled={isSaving}
+              onClick={guard.requestLeave}
+              size="sm"
+              type="button"
+              variant="outline"
             >
-              {t(`errors.${update.error.code}`)}
-            </p>
-          )}
-          <Button
-            disabled={isSaving}
-            onClick={guard.requestLeave}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            {t("common.cancel")}
-          </Button>
-          <Button
-            disabled={!isChanged || isSaving || hasInvalidInputs}
-            onClick={handleSave}
-            size="sm"
-            type="button"
-          >
-            {isSaving ? t("common.saving") : t("common.save")}
-          </Button>
-        </>
-      }
-      onClose={guard.requestLeave}
-      subtitle={target.provider.name}
-      title={
-        model.name?.trim() === "" || model.name === undefined
-          ? model.id
-          : model.name
-      }
-    >
-      <DirtyNotice
-        onCancel={guard.cancel}
-        onConfirm={guard.confirm}
-        open={guard.isBlocked}
-      />
-      <fieldset className="min-w-0" disabled={isSaving}>
-        <ModelDetail
-          baseline={target.model}
-          chrome="panel"
-          editor={editor}
-          errors={undefined}
-          model={model}
-          onBack={guard.requestLeave}
-          onChange={setModel}
-          onEditorChange={setEditor}
-          provider={providerDraft}
+              {t("common.cancel")}
+            </Button>
+            {compatRestore !== null && (
+              <CompatRestoreButton action={compatRestore} isSaving={isSaving} />
+            )}
+            <Button
+              disabled={!isChanged || isSaving || hasInvalidInputs}
+              onClick={handleSave}
+              size="sm"
+              type="button"
+            >
+              {isSaving ? t("common.saving") : t("common.save")}
+            </Button>
+          </>
+        }
+        headerAccessory={<ModelSectionTabs section={section} size="sm" />}
+        onClose={guard.requestLeave}
+        title={modelDisplayName(model)}
+        titleBadge={<Badge variant="secondary">{target.provider.name}</Badge>}
+      >
+        <DirtyNotice
+          onCancel={guard.cancel}
+          onConfirm={guard.confirm}
+          open={guard.isBlocked}
         />
-      </fieldset>
-    </FloatingPanel>
+        <fieldset className="min-w-0" disabled={isSaving}>
+          <ModelDetail
+            baseline={target.model}
+            editor={editor}
+            errors={undefined}
+            model={model}
+            onChange={setModel}
+            onCompatRestoreChange={setCompatRestore}
+            onEditorChange={setEditor}
+            provider={providerDraft}
+            section={section}
+          />
+        </fieldset>
+      </FloatingPanel>
+    </Tabs>
   );
 }

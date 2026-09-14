@@ -42,9 +42,11 @@ import { useCompatResolution } from "../../components/compat/use-compat-resoluti
 import { SettingsRow } from "../../components/SettingsRow";
 import { protocolFamilySchema } from "../../schemas/compat";
 import { BLANK_PROVIDER_DRAFT, type ProviderDraftField } from "../draft";
+import { MODEL_SECTIONS } from "../model-sections";
+import { CompatRestoreButton } from "./CompatRestoreButton";
 import { DeleteProviderButton } from "./DeleteProviderButton";
 import { HeadersEditor } from "./HeadersEditor";
-import { ModelDetail } from "./ModelDetail";
+import { type CompatRestoreAction, ModelDetail } from "./ModelDetail";
 import { ModelDirectory } from "./ModelDirectory";
 import { ProviderCompatPanel } from "./ProviderCompatPanel";
 import { SecondsField } from "./SecondsField";
@@ -115,8 +117,14 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
     hasInvalidCompatInputs(controller.compatInputs) ||
     hasCustomCompat(storedBuckets(compat), defaults.data);
   const [section, setSection] = useState<string>(SECTIONS[0]);
+  const [modelSection, setModelSection] = useState<string>(MODEL_SECTIONS[0]);
   const [requestedFamily, setRequestedFamily] = useState<null | string>(null);
   const [openModelKey, setOpenModelKey] = useState<null | string>(null);
+  // The open model's compat restore, published by the model editor while its
+  // compat section is the open one: it acts on the same draft the footer
+  // saves, so it stands in that footer rather than under the fields.
+  const [modelCompatRestore, setModelCompatRestore] =
+    useState<CompatRestoreAction | null>(null);
   // The families the directory resolves against, and the one the advanced pane
   // shows. Both are decided here because the switcher that picks the family
   // shares this form's tab strip with the section switcher.
@@ -164,6 +172,24 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
       ),
   };
 
+  // The model editor reads one section at a time, and which one belongs to a
+  // single showing of it: opening a model — another one, the same one again, or
+  // after leaving this pane — starts at the first. These two ways in are the
+  // only places that reset it; a re-baseline re-keys the fields without moving
+  // the section the user is reading.
+  function openModel(key: string): void {
+    setModelSection(MODEL_SECTIONS[0]);
+    setOpenModelKey(key);
+  }
+
+  function selectSection(next: string): void {
+    // The model editor is unmounted while any other section shows, so its
+    // section cannot have moved meanwhile: every switch starts it at the
+    // first. The section belongs to one opening of the editor.
+    setModelSection(MODEL_SECTIONS[0]);
+    setSection(next);
+  }
+
   function handleSubmit(event: SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
     controller.save();
@@ -181,7 +207,7 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
     <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
       <Tabs
         className="min-h-0 flex-1 gap-0"
-        onValueChange={setSection}
+        onValueChange={selectSection}
         value={section}
       >
         {/* The pane starts at the section strip: the provider's name is the
@@ -452,21 +478,33 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
                 errors={errors.models}
                 modelRows={controller.modelRows}
                 onModelsChange={controller.updateModelRows}
-                onOpenModel={setOpenModelKey}
+                onOpenModel={openModel}
               />
             ) : (
-              <ModelDetail
-                baseline={openRow.baseline}
-                editor={openRow.editor}
-                errors={errors.models?.[openModelIndex]}
-                model={openRow.model}
-                onBack={() => setOpenModelKey(null)}
-                onChange={(model) => controller.updateModel(openRow.key, model)}
-                onEditorChange={(editor) =>
-                  controller.updateModelEditor(openRow.key, editor)
-                }
-                provider={compatProvider}
-              />
+              // The model's own strip stands in the editor's row, so the tab
+              // root that strip reads stands around the editor.
+              <Tabs
+                className="min-h-0 flex-1 gap-0"
+                onValueChange={setModelSection}
+                value={modelSection}
+              >
+                <ModelDetail
+                  baseline={openRow.baseline}
+                  editor={openRow.editor}
+                  errors={errors.models?.[openModelIndex]}
+                  model={openRow.model}
+                  onBack={() => setOpenModelKey(null)}
+                  onChange={(model) =>
+                    controller.updateModel(openRow.key, model)
+                  }
+                  onCompatRestoreChange={setModelCompatRestore}
+                  onEditorChange={(editor) =>
+                    controller.updateModelEditor(openRow.key, editor)
+                  }
+                  provider={compatProvider}
+                  section={modelSection}
+                />
+              </Tabs>
             )}
           </TabsContent>
           <TabsContent
@@ -546,6 +584,14 @@ export function ProviderDraftForm({ controller }: ProviderDraftFormProps) {
           >
             {t("settings.providers.reset")}
           </Button>
+          {/* Between reset and save: it rewrites the draft those two act on,
+              and only while the model's compat section is the open one. */}
+          {modelCompatRestore !== null && (
+            <CompatRestoreButton
+              action={modelCompatRestore}
+              isSaving={controller.isSaving}
+            />
+          )}
           <Button
             disabled={controller.isSaving || controller.hasInvalidInputs}
             size="sm"

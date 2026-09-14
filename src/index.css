@@ -31,6 +31,7 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-success: var(--success);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -78,6 +79,7 @@
   --accent: #f5f5f5;
   --accent-foreground: #171717;
   --destructive: #ef4444;
+  --success: #0f7b4f;
   --border: #e5e5e5;
   --input: #e5e5e5;
   --ring: #a3a3a3;
@@ -121,6 +123,7 @@
   --accent: #373e47;
   --accent-foreground: #cdd9e5;
   --destructive: #e5534b;
+  --success: #3fb950;
   --border: #444c56;
   --input: #373e47;
   --ring: #316dca;
@@ -297,6 +300,11 @@
   inherits: true;
   initial-value: #ef4444;
 }
+@property --success {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #0f7b4f;
+}
 @property --foreground {
   syntax: "<color>";
   inherits: true;
@@ -402,8 +410,8 @@ html.theme-transition {
     --background, --border, --card, --card-foreground, --code-header, --popover,
     --popover-foreground, --primary, --primary-foreground, --secondary,
     --secondary-foreground, --muted, --muted-foreground, --accent,
-    --accent-foreground, --destructive, --foreground, --input, --ring,
-    --chart-1, --chart-2, --chart-3, --chart-4, --chart-5, --sidebar,
+    --accent-foreground, --destructive, --success, --foreground, --input,
+    --ring, --chart-1, --chart-2, --chart-3, --chart-4, --chart-5, --sidebar,
     --sidebar-foreground, --sidebar-primary, --sidebar-primary-foreground,
     --sidebar-accent, --sidebar-accent-foreground, --sidebar-border,
     --sidebar-ring, --sidebar-selected, --selection, --scrollbar-thumb,
