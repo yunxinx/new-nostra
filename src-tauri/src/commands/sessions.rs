@@ -4,7 +4,9 @@ use tauri::State;
 use crate::db::repo::sessions;
 use crate::error::AppError;
 use crate::state::AppState;
-use crate::types::{ContentBlock, CreatedSession, Session, SessionCursor, SessionPage};
+use crate::types::{
+    ContentBlock, CreatedSession, Session, SessionCursor, SessionModel, SessionPage,
+};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,6 +14,7 @@ pub struct SessionDto {
     pub id: String,
     pub title: String,
     pub pinned: bool,
+    pub model: Option<SessionModel>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -22,6 +25,7 @@ impl From<Session> for SessionDto {
             id: session.id,
             title: session.title,
             pinned: session.pinned,
+            model: session.model,
             created_at: session.created_at,
             updated_at: session.updated_at,
         }
@@ -115,6 +119,8 @@ pub struct SessionCursorParam {
 pub struct CreateSessionParams {
     pub title: String,
     pub content: Vec<ContentBlock>,
+    /// The model the first send picked for this conversation, if any.
+    pub model: Option<SessionModel>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -129,6 +135,13 @@ pub struct RenameSessionParams {
 pub struct SetSessionPinnedParams {
     pub session_id: String,
     pub pinned: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSessionModelParams {
+    pub session_id: String,
+    pub model: SessionModel,
 }
 
 #[derive(Debug, Deserialize)]
@@ -158,7 +171,8 @@ pub async fn create_session(
     let conn = state.db.lock().await;
     super::log_command_failures(
         "create_session",
-        sessions::create(&conn, &params.title, &params.content).map(Into::into),
+        sessions::create(&conn, &params.title, &params.content, params.model.as_ref())
+            .map(Into::into),
     )
 }
 
@@ -187,6 +201,18 @@ pub async fn set_session_pinned(
 }
 
 #[tauri::command]
+pub async fn set_session_model(
+    state: State<'_, AppState>,
+    params: SetSessionModelParams,
+) -> Result<(), AppError> {
+    let conn = state.db.lock().await;
+    super::log_command_failures(
+        "set_session_model",
+        sessions::set_model(&conn, &params.session_id, &params.model),
+    )
+}
+
+#[tauri::command]
 pub async fn delete_session(
     state: State<'_, AppState>,
     params: DeleteSessionParams,
@@ -207,6 +233,10 @@ mod tests {
                 id: "s1".into(),
                 title: "t".into(),
                 pinned: false,
+                model: Some(SessionModel::Provider {
+                    model_id: "m1".into(),
+                    provider_id: "p1".into(),
+                }),
                 created_at: "2024-01-01T00:00:00.000Z".into(),
                 updated_at: "2024-01-01T00:00:00.000Z".into(),
             },
@@ -225,6 +255,10 @@ mod tests {
         assert!(value["session"]["createdAt"].is_string());
         assert!(value["session"]["updatedAt"].is_string());
         assert!(value["session"].get("created_at").is_none());
+        // The selected model is a tagged union the TS mirror discriminates on.
+        assert_eq!(value["session"]["model"]["kind"], serde_json::json!("provider"));
+        assert_eq!(value["session"]["model"]["providerId"], serde_json::json!("p1"));
+        assert_eq!(value["session"]["model"]["modelId"], serde_json::json!("m1"));
         // Entry DTO: role decoded from payload, entry id preserved, `type` tag,
         // camelCase parentId, ordered content blocks.
         assert_eq!(value["entry"]["role"], serde_json::json!("user"));

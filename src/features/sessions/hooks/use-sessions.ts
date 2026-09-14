@@ -3,9 +3,6 @@ import {
   infiniteQueryOptions,
   useInfiniteQuery,
   type UseInfiniteQueryResult,
-  useMutation,
-  type UseMutationOptions,
-  type UseMutationResult,
   useQueryClient,
 } from "@tanstack/react-query";
 import { useRef } from "react";
@@ -13,6 +10,7 @@ import { useRef } from "react";
 import type { SessionPageParam } from "@/lib/session-list-cache";
 import type { AppError, Session, SessionPage } from "@/types/ipc";
 
+import { useCommandMutation } from "@/hooks/use-command-mutation";
 import {
   deleteSession,
   type DeleteSessionParams,
@@ -66,7 +64,7 @@ interface SessionListStream {
 
 export function useDeleteSession() {
   const queryClient = useQueryClient();
-  return useSessionMutation<DeleteSessionParams, DeleteContext>({
+  return useCommandMutation<DeleteSessionParams, DeleteContext>({
     mutationFn: deleteSession,
     networkMode: "always",
     onMutate: (variables) => {
@@ -112,7 +110,7 @@ export function useDeleteSession() {
 
 export function useRenameSession() {
   const queryClient = useQueryClient();
-  return useSessionMutation<RenameSessionParams>({
+  return useCommandMutation<RenameSessionParams>({
     mutationFn: renameSession,
     networkMode: "always",
     // Renaming never bumps updatedAt, so the loaded pages stay valid and a
@@ -168,7 +166,7 @@ export function useSessions(): SessionsResult {
 
 export function useSetSessionPinned() {
   const queryClient = useQueryClient();
-  return useSessionMutation<SetSessionPinnedParams>({
+  return useCommandMutation<SetSessionPinnedParams>({
     mutationFn: setSessionPinned,
     networkMode: "always",
     // Pinning moves a session between the two streams, so both lists restart
@@ -223,13 +221,4 @@ function toStream(query: SessionListQuery): SessionListStream {
     retry: () => void query.refetch(),
     sessions: query.data?.pages.flatMap((page) => page.sessions) ?? [],
   };
-}
-
-// Session mutations succeed with no data and reject with the serialized
-// AppError. Call-site type arguments cannot carry a bare void (lint
-// no-invalid-void-type), so the options type anchors the generics here.
-function useSessionMutation<TVariables, TContext = unknown>(
-  options: UseMutationOptions<void, AppError, TVariables, TContext>,
-): UseMutationResult<void, AppError, TVariables, TContext> {
-  return useMutation(options);
 }

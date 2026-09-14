@@ -1,6 +1,11 @@
 import type { InfiniteData } from "@tanstack/react-query";
 
-import type { Session, SessionCursor, SessionPage } from "@/types/ipc";
+import type {
+  Session,
+  SessionCursor,
+  SessionModel,
+  SessionPage,
+} from "@/types/ipc";
 
 /** Infinite query cache shape for one pinned-filter sessions list. */
 export type SessionListData = InfiniteData<SessionPage, SessionPageParam>;
@@ -67,6 +72,21 @@ export function removeSessionFromList(
   return { pageParams: data.pageParams, pages };
 }
 
+/**
+ * The model one loaded row carries, or null while no loaded page holds it. The
+ * stored reference comes back as it is, so a reader that subscribes to the
+ * cache can compare snapshots by identity.
+ */
+export function sessionModelIn(
+  data: SessionListData | undefined,
+  sessionId: string,
+): null | SessionModel {
+  const session = data?.pages
+    .flatMap((page) => page.sessions)
+    .find((row) => row.id === sessionId);
+  return session?.model ?? null;
+}
+
 /** Updates a loaded row's activity and restores descending keyset order. */
 export function updateSessionActivity(
   data: SessionListData | undefined,
@@ -87,6 +107,30 @@ export function updateSessionActivity(
         updatedAt:
           updatedAt > session.updatedAt ? updatedAt : session.updatedAt,
       });
+}
+
+/**
+ * Replaces one loaded row's model in place, keeping its position: picking a
+ * model is not activity, so the list must not reorder around it. Returns null
+ * when the loaded pages do not hold the row.
+ */
+export function updateSessionModel(
+  data: SessionListData | undefined,
+  sessionId: string,
+  model: null | SessionModel,
+): null | SessionListData {
+  if (!data || !containsSession(data.pages, sessionId)) {
+    return null;
+  }
+  return {
+    pageParams: data.pageParams,
+    pages: data.pages.map((page) => ({
+      ...page,
+      sessions: page.sessions.map((session) =>
+        session.id === sessionId ? { ...session, model } : session,
+      ),
+    })),
+  };
 }
 
 function compareActivity(a: SessionCursor, b: SessionCursor): number {

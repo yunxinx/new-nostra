@@ -41,6 +41,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
   return {
     createdAt: TIMESTAMP,
     id: "s1",
+    model: null,
     pinned: false,
     title: "Original title",
     updatedAt: TIMESTAMP,

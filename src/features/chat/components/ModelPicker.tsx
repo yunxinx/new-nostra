@@ -2,7 +2,7 @@ import { Check, ChevronDown, Search } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { ModelSelection } from "@/types/model-selection";
+import type { SessionModel } from "@/types/ipc";
 
 import {
   FacetedFilter,
@@ -33,8 +33,8 @@ import {
 import { PROTOCOL_FAMILIES } from "@/lib/protocols";
 
 interface ModelPickerProps {
-  model: ModelSelection | null;
-  onPick: (model: ModelSelection | null) => void;
+  model: null | SessionModel;
+  onPick: (model: SessionModel) => void;
 }
 
 const UNIFIED_GROUP = "unified-models";
@@ -124,8 +124,15 @@ export function ModelPicker({ model, onPick }: ModelPickerProps) {
       : pickedAggregate?.item.id;
   const isLoading = providers.isLoading || unified.isLoading;
   const error = providers.error ?? unified.error;
+  // A selection the catalogue no longer resolves drops back to the unpicked
+  // state: the stored model is gone, so naming it would offer what cannot be
+  // sent to. While the catalogue is still arriving the raw name stands in for
+  // the read that will replace it.
+  const triggerLabel =
+    pickedLabel ??
+    (model !== null && isLoading ? model.modelId : t("chat.modelPickerEmpty"));
 
-  function pick(next: ModelSelection): void {
+  function pick(next: SessionModel): void {
     onPick(next);
     setIsOpen(false);
   }
@@ -140,10 +147,7 @@ export function ModelPicker({ model, onPick }: ModelPickerProps) {
           type="button"
           variant="ghost"
         >
-          <span className="truncate">
-            {pickedLabel ??
-              (model === null ? t("chat.modelPickerEmpty") : model.modelId)}
-          </span>
+          <span className="truncate">{triggerLabel}</span>
           <ChevronDown className="size-3.5 shrink-0 opacity-60" />
         </Button>
       </PopoverTrigger>

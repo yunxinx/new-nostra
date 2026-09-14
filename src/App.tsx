@@ -130,7 +130,7 @@ export function App() {
           left: sidebarCollapsed ? (isMacOs() ? 148 : 80) : sidebarWidth + 6,
         }}
       >
-        <ChatHeader composerKey={composerKey} />
+        <ChatHeader composerKey={composerKey} sessionId={activeSessionId} />
       </div>
       <TitleBarControls>
         <SidebarToggleButton

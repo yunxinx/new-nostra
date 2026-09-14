@@ -17,7 +17,7 @@ import {
 } from "vitest";
 
 import type { Provider, ProviderPreset } from "@/types/ipc";
-import type { ModelSelection } from "@/types/model-selection";
+import type { SessionModel } from "@/types/ipc";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { initI18n } from "@/lib/i18n";
@@ -121,7 +121,7 @@ function heading(group: HTMLElement): HTMLElement {
  * placeholder.
  */
 async function renderPicker(
-  model: ModelSelection | null = null,
+  model: null | SessionModel = null,
   settlesTo = "Pick a model",
   options: { presets?: ProviderPreset[]; providers?: Provider[] } = {},
 ): Promise<{ onPick: ReturnType<typeof vi.fn> }> {
@@ -130,7 +130,7 @@ async function renderPicker(
   });
   vi.mocked(listProviderPresets).mockResolvedValue(options.presets ?? []);
   vi.mocked(listUnifiedModels).mockResolvedValue([]);
-  const onPick = vi.fn<(model: ModelSelection | null) => void>();
+  const onPick = vi.fn<(model: null | SessionModel) => void>();
   render(
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
@@ -207,5 +207,42 @@ describe("model picker", () => {
 
     expect(screen.queryByText("alpha-fast")).toBeNull();
     expect(screen.getByText("No matching models")).toBeTruthy();
+  });
+
+  it("drops a selected model the catalogue no longer holds", async () => {
+    await renderPicker(
+      { kind: "provider", modelId: "retired", providerId: "p1" },
+      "Pick a model",
+    );
+
+    // The trigger names the placeholder, not the selection: there is nothing
+    // left to send to, so the picker reads as unpicked.
+    const trigger = screen.getByRole("button", { name: "Pick a model" });
+    expect(trigger.textContent).not.toContain("retired");
+  });
+
+  it("names a selection by its request name while the catalogue is still arriving", () => {
+    // A read that never settles: the trigger can only show the stored selection.
+    listProvidersMock.mockReturnValue(new Promise(() => undefined));
+    vi.mocked(listProviderPresets).mockResolvedValue([]);
+    vi.mocked(listUnifiedModels).mockResolvedValue([]);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <ModelPicker
+            model={{
+              kind: "provider",
+              modelId: "alpha-fast",
+              providerId: "p1",
+            }}
+            onPick={vi.fn()}
+          />
+        </TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Pick a model" }).textContent,
+    ).toContain("alpha-fast");
   });
 });

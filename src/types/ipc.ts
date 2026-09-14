@@ -393,11 +393,13 @@ export interface ResolveSettingsCloseParams {
 
 /**
  * Mirrors src-tauri/src/commands/sessions.rs SessionDto. RFC 3339 UTC
- * timestamps with fixed millisecond precision.
+ * timestamps with fixed millisecond precision; `model` is null until a
+ * conversation picks one.
  */
 export interface Session {
   createdAt: string;
   id: string;
+  model: null | SessionModel;
   pinned: boolean;
   title: string;
   updatedAt: string;
@@ -420,6 +422,17 @@ export interface SessionCursor {
   id: string;
   updatedAt: string;
 }
+
+/**
+ * Mirrors src-tauri/src/types.rs SessionModel: the model one conversation
+ * speaks to `kind` picks the lookup — a registered model under its provider,
+ * or a unified model name. A selection the catalogue no longer resolves reads
+ * as no selection; nothing rewrites it.
+ * Legal value: { kind: "provider", providerId: "p1", modelId: "m1" }
+ */
+export type SessionModel =
+  | { kind: "provider"; modelId: string; providerId: string }
+  | { kind: "unified"; modelId: string };
 
 /**
  * Mirrors src-tauri/src/commands/sessions.rs SessionPageDto: one keyset page

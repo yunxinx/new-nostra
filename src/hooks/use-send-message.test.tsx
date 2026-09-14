@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import {
+  type InfiniteData,
   InfiniteQueryObserver,
   onlineManager,
   QueryClient,
@@ -16,6 +17,7 @@ import type {
   CreatedSession,
   Entry,
   PathPage,
+  SessionModel,
   SessionPage,
 } from "@/types/ipc";
 
@@ -37,7 +39,11 @@ const NOW = "2026-09-09T00:00:00.000Z";
 beforeAll(initI18n);
 
 let queryClient: QueryClient;
-let createParams: Array<{ content: ContentBlock[]; title: string }>;
+let createParams: Array<{
+  content: ContentBlock[];
+  model?: SessionModel;
+  title: string;
+}>;
 let appendParams: Array<{ content: ContentBlock[]; sessionId: string }>;
 let failCreate: boolean;
 let failAppend: boolean;
@@ -205,7 +211,11 @@ beforeEach(() => {
       }
       case "create_session": {
         const { params } = payload as {
-          params: { content: ContentBlock[]; title: string };
+          params: {
+            content: ContentBlock[];
+            model?: SessionModel;
+            title: string;
+          };
         };
         createParams.push(params);
         if (failCreate) {
@@ -224,6 +234,7 @@ beforeEach(() => {
           session: {
             createdAt: NOW,
             id: `s-new-${String(createdCount)}`,
+            model: params.model ?? null,
             pinned: false,
             title: params.title,
             updatedAt: NOW,
@@ -290,8 +301,11 @@ describe("useSendMessage first send", () => {
       await Promise.resolve();
     });
     expect(createParams).toHaveLength(1);
+    // The draft's pick travels with the create, so the session row it returns
+    // is the one that carries the model.
     expect(createParams[0]).toEqual({
       content: [{ text: "Hello world", type: "text" }],
+      model: { kind: "provider", modelId: "m1", providerId: "p1" },
       title: "Hello world",
     });
 
@@ -299,12 +313,18 @@ describe("useSendMessage first send", () => {
       expect(useUiStore.getState().activeSessionId).toBe("s-new-1");
     });
     expect(useUiStore.getState().drafts.get(draftKeyFor(1))).toBeUndefined();
-    expect(useUiStore.getState().modelByDraft.get("s-new-1")).toEqual({
+    // The session row owns the pick from here on; the spent draft key keeps
+    // nothing, so revisiting it cannot resurrect the model.
+    expect(useUiStore.getState().modelByDraft.has(draftKeyFor(1))).toBe(false);
+    const created = queryClient
+      .getQueryData<InfiniteData<SessionPage>>(sessionsKeys.list(false))
+      ?.pages.flatMap((page) => page.sessions)
+      .find((session) => session.id === "s-new-1");
+    expect(created?.model).toEqual({
       kind: "provider",
       modelId: "m1",
       providerId: "p1",
     });
-    expect(useUiStore.getState().modelByDraft.has(draftKeyFor(1))).toBe(false);
     expect(useUiStore.getState().pendingSubmits.has(draftKeyFor(1))).toBe(
       false,
     );
@@ -419,6 +439,7 @@ describe("useSendMessage first send", () => {
       session: {
         createdAt: NOW,
         id: "s-new-1",
+        model: null,
         pinned: false,
         title: "double enter",
         updatedAt: NOW,
@@ -508,6 +529,7 @@ describe("useSendMessage first send", () => {
       session: {
         createdAt: NOW,
         id: "s-new-1",
+        model: null,
         pinned: false,
         title: "first draft",
         updatedAt: NOW,
@@ -565,6 +587,7 @@ describe("useSendMessage append", () => {
             {
               createdAt: NOW,
               id: "s-other",
+              model: null,
               pinned: false,
               title: "Other",
               updatedAt: NOW,
@@ -572,6 +595,7 @@ describe("useSendMessage append", () => {
             {
               createdAt: "2000-01-01T00:00:00.000Z",
               id: "s1",
+              model: null,
               pinned: false,
               title: "Target",
               updatedAt: "2000-01-01T00:00:00.000Z",

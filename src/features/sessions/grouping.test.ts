@@ -16,6 +16,7 @@ function session(overrides: Partial<Session>): Session {
   return {
     createdAt: "2026-09-01T00:00:00.000Z",
     id: "id",
+    model: null,
     pinned: false,
     title: "title",
     updatedAt: localIso(0),

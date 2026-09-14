@@ -74,6 +74,7 @@ function session(id: string, title: string): Session {
   return {
     createdAt: TIMESTAMP,
     id,
+    model: null,
     pinned: false,
     title,
     updatedAt: TIMESTAMP,

@@ -4,12 +4,15 @@ import type {
   ContentBlock,
   CreatedSession,
   SessionCursor,
+  SessionModel,
   SessionPage,
 } from "@/types/ipc";
 
-/** create_session request: the first-send title and content, committed atomically. */
+/** create_session request: the first-send title, content and picked model, committed atomically. */
 export interface CreateSessionParams {
   content: ContentBlock[];
+  /** The model the draft picked, when one was picked before the first send. */
+  model?: SessionModel | undefined;
   title: string;
 }
 
@@ -29,6 +32,12 @@ export interface ListSessionsParams {
 export interface RenameSessionParams {
   sessionId: string;
   title: string;
+}
+
+/** set_session_model request: the conversation's model from now on, not activity. */
+export interface SetSessionModelParams {
+  model: SessionModel;
+  sessionId: string;
 }
 
 /** set_session_pinned request: changes group membership, not updatedAt. */
@@ -70,6 +79,15 @@ export function listSessions(params: ListSessionsParams): Promise<SessionPage> {
  */
 export function renameSession(params: RenameSessionParams): Promise<void> {
   return invoke("rename_session", { params });
+}
+
+/**
+ * Sets the model this conversation speaks to. Rejects with AppError when the
+ * session is missing; a stored selection survives its model being removed, so
+ * a rejection here is never about the catalogue.
+ */
+export function setSessionModel(params: SetSessionModelParams): Promise<void> {
+  return invoke("set_session_model", { params });
 }
 
 /**

@@ -2,7 +2,9 @@ use rusqlite::{params, Connection, Row};
 
 use crate::db::repo::entries;
 use crate::error::{AppError, ErrorCode};
-use crate::types::{ContentBlock, CreatedSession, Session, SessionCursor, SessionPage};
+use crate::types::{
+    ContentBlock, CreatedSession, Session, SessionCursor, SessionModel, SessionPage,
+};
 
 const MAX_PAGE_SIZE: u32 = 50;
 
@@ -10,14 +12,23 @@ fn clamp_limit(limit: Option<u32>) -> u32 {
     limit.unwrap_or(MAX_PAGE_SIZE).clamp(1, MAX_PAGE_SIZE)
 }
 
+const SESSION_COLUMNS: &str = "id, title, pinned, active_leaf_id, created_at, updated_at, model";
+
 fn row_to_session(row: &Row) -> rusqlite::Result<Session> {
     Ok(Session {
         id: row.get("id")?,
         title: row.get("title")?,
         pinned: row.get::<_, i64>("pinned")? != 0,
+        model: decode_model(row.get::<_, Option<String>>("model")?),
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })
+}
+
+/// A stored model that no longer decodes reads as no selection: the session row
+/// carries more than the model, so a damaged value must not fail the whole list.
+fn decode_model(stored: Option<String>) -> Option<SessionModel> {
+    stored.and_then(|json| serde_json::from_str(&json).ok())
 }
 
 /// Atomically inserts a session and its first user message in one transaction.
@@ -26,6 +37,7 @@ pub fn create(
     conn: &Connection,
     title: &str,
     content: &[ContentBlock],
+    model: Option<&SessionModel>,
 ) -> Result<CreatedSession, AppError> {
     let trimmed = title.trim();
     if trimmed.is_empty() {
@@ -38,18 +50,23 @@ pub fn create(
     let tx = conn.unchecked_transaction()?;
     let now = entries::now_utc(&tx)?;
     let id = uuid::Uuid::now_v7().to_string();
+    let stored_model = model.map(serde_json::to_string).transpose().map_err(|err| AppError {
+        code: ErrorCode::Internal,
+        message: format!("session model did not serialize: {err}"),
+    })?;
 
     tx.prepare_cached(
-        "INSERT INTO sessions (id, title, pinned, active_leaf_id, created_at, updated_at)
-         VALUES (?1, ?2, 0, NULL, ?3, ?3)",
+        "INSERT INTO sessions (id, title, pinned, active_leaf_id, created_at, updated_at, model)
+         VALUES (?1, ?2, 0, NULL, ?3, ?3, ?4)",
     )?
-    .execute(params![id, trimmed, now])?;
+    .execute(params![id, trimmed, now, stored_model])?;
 
     let entry = entries::append_in_transaction(&tx, &id, None, content, &now)?;
     let session = Session {
         id,
         title: trimmed.to_string(),
         pinned: false,
+        model: model.cloned(),
         created_at: now.clone(),
         updated_at: now,
     };
@@ -71,13 +88,13 @@ pub fn list(
 
     let mut sessions: Vec<Session> = match cursor {
         Some(cursor) => {
-            let mut stmt = conn.prepare_cached(
-                "SELECT id, title, pinned, active_leaf_id, created_at, updated_at
+            let mut stmt = conn.prepare_cached(&format!(
+                "SELECT {SESSION_COLUMNS}
                  FROM sessions
                  WHERE pinned = ?1 AND (updated_at, id) < (?2, ?3)
                  ORDER BY updated_at DESC, id DESC
-                 LIMIT ?4",
-            )?;
+                 LIMIT ?4"
+            ))?;
             let rows = stmt
                 .query_map(
                     params![pinned_flag, cursor.updated_at, cursor.id, probe],
@@ -87,13 +104,13 @@ pub fn list(
             rows
         }
         None => {
-            let mut stmt = conn.prepare_cached(
-                "SELECT id, title, pinned, active_leaf_id, created_at, updated_at
+            let mut stmt = conn.prepare_cached(&format!(
+                "SELECT {SESSION_COLUMNS}
                  FROM sessions
                  WHERE pinned = ?1
                  ORDER BY updated_at DESC, id DESC
-                 LIMIT ?2",
-            )?;
+                 LIMIT ?2"
+            ))?;
             let rows = stmt
                 .query_map(params![pinned_flag, probe], row_to_session)?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -138,6 +155,26 @@ pub fn set_pinned(conn: &Connection, session_id: &str, pinned: bool) -> Result<(
     let changed = conn
         .prepare_cached("UPDATE sessions SET pinned = ?1 WHERE id = ?2")?
         .execute(params![i64::from(pinned), session_id])?;
+    if changed == 0 {
+        return Err(AppError { code: ErrorCode::NotFound, message: "session not found".into() });
+    }
+    Ok(())
+}
+
+/// Sets the model a conversation speaks to without touching `updated_at`;
+/// picking a model is not activity. Rejects an unknown session.
+pub fn set_model(
+    conn: &Connection,
+    session_id: &str,
+    model: &SessionModel,
+) -> Result<(), AppError> {
+    let stored = serde_json::to_string(model).map_err(|err| AppError {
+        code: ErrorCode::Internal,
+        message: format!("session model did not serialize: {err}"),
+    })?;
+    let changed = conn
+        .prepare_cached("UPDATE sessions SET model = ?1 WHERE id = ?2")?
+        .execute(params![stored, session_id])?;
     if changed == 0 {
         return Err(AppError { code: ErrorCode::NotFound, message: "session not found".into() });
     }
@@ -192,7 +229,7 @@ mod tests {
 
     fn read_session(conn: &Connection, session_id: &str) -> Result<Session, AppError> {
         conn.query_row(
-            "SELECT id, title, pinned, active_leaf_id, created_at, updated_at
+            "SELECT id, title, pinned, active_leaf_id, created_at, updated_at, model
              FROM sessions WHERE id = ?1",
             params![session_id],
             row_to_session,
@@ -203,6 +240,10 @@ mod tests {
             }
             other => other.into(),
         })
+    }
+
+    fn selection() -> SessionModel {
+        SessionModel::Provider { model_id: "m1".into(), provider_id: "p1".into() }
     }
 
     fn text(body: &str) -> Vec<ContentBlock> {
@@ -245,7 +286,7 @@ mod tests {
     #[test]
     fn create_writes_session_and_first_entry_atomically() {
         let conn = memory_db();
-        let created = create(&conn, "Hello", &text("hi there")).unwrap();
+        let created = create(&conn, "Hello", &text("hi there"), None).unwrap();
         assert_eq!(created.session.title, "Hello");
         assert_eq!(created.entry.role, MessageRole::User);
 
@@ -269,14 +310,14 @@ mod tests {
     #[test]
     fn create_rejects_blank_title() {
         let conn = memory_db();
-        let err = create(&conn, "   ", &text("hi")).unwrap_err();
+        let err = create(&conn, "   ", &text("hi"), None).unwrap_err();
         assert_eq!(err.code, ErrorCode::InvalidInput);
     }
 
     #[test]
     fn create_rejects_whitespace_only_content() {
         let conn = memory_db();
-        let err = create(&conn, "Title", &text("   ")).unwrap_err();
+        let err = create(&conn, "Title", &text("   "), None).unwrap_err();
         assert_eq!(err.code, ErrorCode::InvalidInput);
         let sessions: i64 =
             conn.query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0)).unwrap();
@@ -295,7 +336,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = create(&conn, "Title", &text("hi"));
+        let result = create(&conn, "Title", &text("hi"), None);
         assert!(result.is_err());
 
         let sessions: i64 =
@@ -309,7 +350,7 @@ mod tests {
     #[test]
     fn rename_and_pin_do_not_bump_updated_at() {
         let conn = memory_db();
-        let created = create(&conn, "Old", &text("hi")).unwrap();
+        let created = create(&conn, "Old", &text("hi"), None).unwrap();
         let original_updated = created.session.updated_at.clone();
 
         rename(&conn, &created.session.id, "New").unwrap();
@@ -324,9 +365,64 @@ mod tests {
     #[test]
     fn rename_rejects_blank_title() {
         let conn = memory_db();
-        let created = create(&conn, "Keep", &text("hi")).unwrap();
+        let created = create(&conn, "Keep", &text("hi"), None).unwrap();
         let err = rename(&conn, &created.session.id, "  ").unwrap_err();
         assert_eq!(err.code, ErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn a_created_session_keeps_the_model_its_first_send_chose() {
+        let conn = memory_db();
+        let created = create(&conn, "Hello", &text("hi"), Some(&selection())).unwrap();
+
+        assert_eq!(created.session.model, Some(selection()));
+        let listed = list(&conn, false, None, None).unwrap();
+        assert_eq!(listed.sessions[0].model, Some(selection()));
+        let stored: String = conn
+            .query_row(
+                "SELECT model FROM sessions WHERE id = ?1",
+                params![created.session.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, r#"{"kind":"provider","modelId":"m1","providerId":"p1"}"#);
+    }
+
+    #[test]
+    fn reselecting_a_model_is_not_activity() {
+        let conn = memory_db();
+        let created = create(&conn, "Old", &text("hi"), None).unwrap();
+        let original_updated = created.session.updated_at.clone();
+
+        set_model(&conn, &created.session.id, &SessionModel::Unified { model_id: "fast".into() })
+            .unwrap();
+
+        let after = read_session(&conn, &created.session.id).unwrap();
+        assert_eq!(after.model, Some(SessionModel::Unified { model_id: "fast".into() }));
+        assert_eq!(after.updated_at, original_updated);
+        let stored: String = conn
+            .query_row(
+                "SELECT model FROM sessions WHERE id = ?1",
+                params![created.session.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, r#"{"kind":"unified","modelId":"fast"}"#);
+    }
+
+    #[test]
+    fn a_model_that_no_longer_decodes_reads_as_no_selection() {
+        let conn = memory_db();
+        let created = create(&conn, "Hello", &text("hi"), Some(&selection())).unwrap();
+        conn.execute(
+            "UPDATE sessions SET model = '{ not json' WHERE id = ?1",
+            params![created.session.id],
+        )
+        .unwrap();
+
+        let listed = list(&conn, false, None, None).unwrap();
+        assert_eq!(listed.sessions.len(), 1);
+        assert_eq!(listed.sessions[0].model, None);
     }
 
     #[test]
@@ -334,6 +430,7 @@ mod tests {
         let conn = memory_db();
         assert_eq!(rename(&conn, "nope", "x").unwrap_err().code, ErrorCode::NotFound);
         assert_eq!(set_pinned(&conn, "nope", true).unwrap_err().code, ErrorCode::NotFound);
+        assert_eq!(set_model(&conn, "nope", &selection()).unwrap_err().code, ErrorCode::NotFound);
         assert_eq!(delete(&conn, "nope").unwrap_err().code, ErrorCode::NotFound);
     }
 
@@ -384,8 +481,8 @@ mod tests {
     #[test]
     fn list_filters_by_pinned() {
         let conn = memory_db();
-        let a = create(&conn, "plain", &text("hi")).unwrap();
-        let b = create(&conn, "fav", &text("hi")).unwrap();
+        let a = create(&conn, "plain", &text("hi"), None).unwrap();
+        let b = create(&conn, "fav", &text("hi"), None).unwrap();
         set_pinned(&conn, &b.session.id, true).unwrap();
 
         let plain = list(&conn, false, None, None).unwrap();
@@ -399,7 +496,7 @@ mod tests {
     #[test]
     fn delete_clears_deep_multi_root_forest_beyond_trigger_recursion_limit() {
         let conn = memory_db();
-        let created = create(&conn, "deep", &text("root-a")).unwrap();
+        let created = create(&conn, "deep", &text("root-a"), None).unwrap();
         let session_id = &created.session.id;
 
         // First root already exists (from create). Grow it past the SQLite trigger
@@ -451,8 +548,8 @@ mod tests {
     #[test]
     fn delete_leaves_other_sessions_untouched() {
         let conn = memory_db();
-        let keep = create(&conn, "keep", &text("hi")).unwrap();
-        let drop = create(&conn, "drop", &text("hi")).unwrap();
+        let keep = create(&conn, "keep", &text("hi"), None).unwrap();
+        let drop = create(&conn, "drop", &text("hi"), None).unwrap();
         append_chain(&conn, &drop.session.id, 5);
 
         delete(&conn, &drop.session.id).unwrap();

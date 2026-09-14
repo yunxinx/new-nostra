@@ -17,6 +17,7 @@ import type {
   UnifiedModelListItem,
 } from "@/types/ipc";
 
+import { useCommandMutation } from "@/hooks/use-command-mutation";
 import {
   createProvider,
   type CreateProviderParams,
@@ -88,7 +89,7 @@ export function useCreateUnifiedModel() {
 
 export function useDeleteProvider() {
   const queryClient = useQueryClient();
-  return useVoidProviderMutation<DeleteProviderParams>({
+  return useCommandMutation<DeleteProviderParams>({
     mutationFn: deleteProvider,
     networkMode: "always",
     onSuccess: async () => {
@@ -100,7 +101,7 @@ export function useDeleteProvider() {
 
 export function useDeleteUnifiedModel() {
   const queryClient = useQueryClient();
-  return useVoidProviderMutation<DeleteUnifiedModelParams>({
+  return useCommandMutation<DeleteUnifiedModelParams>({
     mutationFn: deleteUnifiedModel,
     networkMode: "always",
     onSuccess: async () => {
@@ -196,7 +197,18 @@ export function useUpdateUnifiedModel() {
   return useProviderMutation<UnifiedModel, UpdateUnifiedModelParams>({
     mutationFn: updateUnifiedModel,
     networkMode: "always",
-    onSuccess: async () => {
+    onSuccess: async (unified, variables) => {
+      // The write's own document is the result: swapping the row the request
+      // addressed — by the id it named, which is the old one on a rename —
+      // keeps the list off its pre-write shape while the refresh runs.
+      await queryClient.cancelQueries({ queryKey: unifiedModelsKeys.all });
+      queryClient.setQueryData<UnifiedModelListItem[]>(
+        unifiedModelsKeys.all,
+        (current) =>
+          current?.map((item) =>
+            !("corrupted" in item) && item.id === variables.id ? unified : item,
+          ),
+      );
       await queryClient.invalidateQueries({
         queryKey: unifiedModelsKeys.all,
       });
@@ -216,17 +228,9 @@ async function invalidateProviderWrites(
 }
 
 // Mutations reject with the serialized AppError rather than an Error instance,
-// so the wrappers pin TError for callers branching on `error.code`. A call
-// site cannot spell a bare `void` type argument (lint no-invalid-void-type),
-// hence the separate wrapper for the commands that resolve null.
+// so the wrapper pins TError for callers branching on `error.code`.
 function useProviderMutation<TData, TVariables, TContext = unknown>(
   options: UseMutationOptions<TData, AppError, TVariables, TContext>,
 ): UseMutationResult<TData, AppError, TVariables, TContext> {
-  return useMutation(options);
-}
-
-function useVoidProviderMutation<TVariables = void, TContext = unknown>(
-  options: UseMutationOptions<void, AppError, TVariables, TContext>,
-): UseMutationResult<void, AppError, TVariables, TContext> {
   return useMutation(options);
 }

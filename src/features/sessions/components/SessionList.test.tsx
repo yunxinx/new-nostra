@@ -62,6 +62,7 @@ function session(pinned: boolean): Session {
   return {
     createdAt: TIMESTAMP,
     id: pinned ? "p1" : "s1",
+    model: null,
     pinned,
     title: pinned ? "Pinned chat" : "Standard chat",
     updatedAt: TIMESTAMP,

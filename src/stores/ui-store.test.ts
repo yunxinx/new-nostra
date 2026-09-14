@@ -58,33 +58,20 @@ describe("useUiStore", () => {
     expect(useUiStore.getState().themeOverride).toBe("dark");
   });
 
-  it("moves a model selection to the created session without changing the active view", () => {
+  it("drops a draft's model pick when it is cleared or the draft is revoked", () => {
     const store = useUiStore.getState();
     const model = { kind: "unified", modelId: "fast" } as const;
     store.setModel("draft:0", model);
+    expect(useUiStore.getState().modelByDraft.get("draft:0")).toEqual(model);
+
+    store.setModel("draft:0", null);
+    expect(useUiStore.getState().modelByDraft.has("draft:0")).toBe(false);
+
+    store.setModel("draft:0", model);
     store.setActiveSession("another-session");
-    store.transferDraftModel("draft:0", "created-session");
-    expect(useUiStore.getState().modelByDraft.get("created-session")).toEqual(
-      model,
-    );
-    expect(useUiStore.getState().modelByDraft.has("draft:0")).toBe(false);
-    expect(useUiStore.getState().activeSessionId).toBe("another-session");
-  });
-
-  it("keeps a newer session selection and does not resurrect revoked drafts", () => {
-    const store = useUiStore.getState();
-    store.setModel("draft:0", { kind: "unified", modelId: "old" });
-    store.setModel("created-session", { kind: "unified", modelId: "new" });
-    store.transferDraftModel("draft:0", "created-session");
-    expect(
-      useUiStore.getState().modelByDraft.get("created-session")?.modelId,
-    ).toBe("new");
-    expect(useUiStore.getState().modelByDraft.has("draft:0")).toBe(false);
-
-    store.setModel("draft:0", { kind: "unified", modelId: "revoked" });
     store.startNewChat();
-    store.transferDraftModel("draft:0", "late-session");
-    expect(useUiStore.getState().modelByDraft.has("late-session")).toBe(false);
+    expect(useUiStore.getState().modelByDraft.has("draft:0")).toBe(false);
+    expect(useUiStore.getState().activeSessionId).toBeNull();
   });
 
   it("starts a fresh draft from a selected session or an existing draft", () => {

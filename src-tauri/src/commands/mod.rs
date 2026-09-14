@@ -15,6 +15,7 @@ pub fn handler() -> impl Fn(Invoke) -> bool + Send + Sync + 'static {
         sessions::create_session,
         sessions::rename_session,
         sessions::set_session_pinned,
+        sessions::set_session_model,
         sessions::delete_session,
         entries::append_message,
         entries::load_active_path,

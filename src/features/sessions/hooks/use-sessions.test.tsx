@@ -85,6 +85,7 @@ function makeSessions(pinned: boolean, count: number): Session[] {
   return Array.from({ length: count }, (_, index) => ({
     createdAt: SAME_TIMESTAMP,
     id: `${pinned ? "p" : "n"}${String(index).padStart(2, "0")}`,
+    model: null,
     pinned,
     title: `Session ${pinned ? "p" : "n"}${String(index)}`,
     updatedAt: SAME_TIMESTAMP,

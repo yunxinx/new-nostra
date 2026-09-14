@@ -130,6 +130,16 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "drop_unified_model_hide",
         sql: "ALTER TABLE unified_models DROP COLUMN hide;",
     },
+    // The model a conversation speaks to is a session fact, so it is stored
+    // with the row rather than with the app's own preferences. No foreign key:
+    // either half of the catalogue (provider model, unified name) may retire
+    // while the conversation stays readable, and a selection that no longer
+    // resolves reads as no selection.
+    Migration {
+        version: 5,
+        description: "add_session_model",
+        sql: "ALTER TABLE sessions ADD COLUMN model TEXT;",
+    },
 ];
 
 pub fn run_migrations(conn: &Connection) -> Result<(), AppError> {
@@ -193,7 +203,7 @@ mod tests {
     fn fresh_database_runs_to_latest() {
         let conn = migrated_memory_db();
         let version: u32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
     }
 
     #[test]
@@ -252,7 +262,7 @@ mod tests {
             .collect();
         assert_eq!(
             cols,
-            vec!["id", "title", "pinned", "active_leaf_id", "created_at", "updated_at"]
+            vec!["id", "title", "pinned", "active_leaf_id", "created_at", "updated_at", "model"]
         );
     }
 
@@ -680,7 +690,7 @@ mod tests {
         run_migrations(&conn).unwrap();
 
         let version: u32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
         let title: String = conn
             .query_row("SELECT title FROM sessions WHERE id = 's1'", [], |row| row.get(0))
             .unwrap();

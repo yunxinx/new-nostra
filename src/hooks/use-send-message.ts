@@ -6,6 +6,7 @@ import type {
   ContentBlock,
   CreatedSession,
   Entry,
+  SessionModel,
 } from "@/types/ipc";
 
 import { appendMessage } from "@/lib/ipc/entries";
@@ -46,6 +47,8 @@ type SendResult =
   | { entry: Entry; kind: "append" };
 
 interface SendVariables {
+  /** The draft's model pick, carried into the session this send creates. */
+  model: SessionModel | undefined;
   onSettled: ((sessionId: null | string) => void) | undefined;
   target: SendTarget;
   text: string;
@@ -60,6 +63,7 @@ export function useSendMessage(): SendMessageResult {
       if (variables.target.sessionId === null) {
         const created = await createSession({
           content: textToContent(variables.text),
+          model: variables.model,
           title: deriveTitle(variables.text, t("app.newChat")),
         });
         return { created, kind: "create" };
@@ -153,7 +157,8 @@ export function useSendMessage(): SendMessageResult {
     });
     useUiStore.getState().setEnteringSession(created.session.id);
     const store = useUiStore.getState();
-    store.transferDraftModel(variables.target.draftKey, created.session.id);
+    // The created row owns the pick the draft carried; the draft key is spent.
+    store.setModel(variables.target.draftKey, null);
     // The new session takes over the view only while the user still sits on
     // the same draft; otherwise it just appears in the sidebar and the
     // current selection stays untouched.
@@ -190,7 +195,12 @@ export function useSendMessage(): SendMessageResult {
     }
     store.beginSubmit(target.draftKey);
     store.setDraftError(target.draftKey, null);
-    mutation.mutate({ onSettled, target, text: trimmed });
+    mutation.mutate({
+      model: store.modelByDraft.get(target.draftKey),
+      onSettled,
+      target,
+      text: trimmed,
+    });
   }
 
   return { send };

@@ -24,6 +24,7 @@ import type {
   CreatedSession,
   Entry,
   Session,
+  SessionModel,
   SessionPage,
 } from "@/types/ipc";
 
@@ -110,12 +111,17 @@ beforeEach(() => {
       }
       case "create_session": {
         const { params } = payload as {
-          params: { content: ContentBlock[]; title: string };
+          params: {
+            content: ContentBlock[];
+            model?: SessionModel;
+            title: string;
+          };
         };
         createCalls += 1;
         const session: Session = {
           createdAt: NOW,
           id: "s-created",
+          model: params.model ?? null,
           pinned: false,
           title: params.title,
           updatedAt: NOW,
@@ -314,6 +320,7 @@ describe("deleting sessions", () => {
       {
         createdAt: NOW,
         id: "s-other",
+        model: null,
         pinned: false,
         title: "Other chat",
         updatedAt: NOW,
@@ -321,6 +328,7 @@ describe("deleting sessions", () => {
       {
         createdAt: NOW,
         id: "s-open",
+        model: null,
         pinned: false,
         title: "Open chat",
         updatedAt: NOW,

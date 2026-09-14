@@ -2,8 +2,7 @@ import { enableMapSet } from "immer";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
-import type { AppError } from "@/types/ipc";
-import type { ModelSelection } from "@/types/model-selection";
+import type { AppError, SessionModel } from "@/types/ipc";
 
 // Map/Set drafts need the immer plugin; the call is idempotent.
 enableMapSet();
@@ -30,8 +29,12 @@ interface UiState {
   endSubmit: (key: string) => void;
   /** Session id whose sidebar row is playing its enter animation. */
   enteringSessionId: null | string;
-  /** Model picked per draft location: a session id, or `draft:<n>`. */
-  modelByDraft: Map<string, ModelSelection>;
+  /**
+   * Model picked in an unsaved draft, keyed by its composer key. A stored
+   * session's selection lives on its row instead; the draft's pick is carried
+   * into the session by the first send.
+   */
+  modelByDraft: Map<string, SessionModel>;
   pendingDeletes: Set<string>;
   pendingSubmits: Set<string>;
   resolveSubmit: (key: string, submittedText: string) => void;
@@ -39,7 +42,7 @@ interface UiState {
   setDraft: (key: string, text: string) => void;
   setDraftError: (key: string, error: AppError | null) => void;
   setEnteringSession: (id: string) => void;
-  setModel: (key: string, model: ModelSelection | null) => void;
+  setModel: (key: string, model: null | SessionModel) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setSidebarWidth: (width: number) => void;
   setThemeOverride: (override: ThemeOverride) => void;
@@ -55,7 +58,6 @@ interface UiState {
   themeOverride: ThemeOverride;
   toggleSettingsNavCollapsed: () => void;
   toggleSidebarCollapsed: () => void;
-  transferDraftModel: (draftKey: string, sessionId: string) => void;
 }
 
 /** Draft location for the anonymous new-chat target: `draft:<draftId>`. */
@@ -174,15 +176,6 @@ export const useUiStore = create<UiState>()(
     toggleSidebarCollapsed: () =>
       set((state) => {
         state.sidebarCollapsed = !state.sidebarCollapsed;
-      }),
-    transferDraftModel: (draftKey, sessionId) =>
-      set((state) => {
-        const model = state.modelByDraft.get(draftKey);
-        // A selection made directly in the created session takes precedence.
-        if (model !== undefined && !state.modelByDraft.has(sessionId)) {
-          state.modelByDraft.set(sessionId, model);
-        }
-        state.modelByDraft.delete(draftKey);
       }),
   })),
 );

@@ -546,7 +546,7 @@ mod tests {
     #[test]
     fn append_grows_chain_from_active_leaf_and_bumps_updated_at() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let sid = &created.session.id;
         set_updated_at(&conn, sid, "2000-01-01T00:00:00.000Z");
 
@@ -567,7 +567,7 @@ mod tests {
     #[test]
     fn append_rejects_blank_content() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let err = append(&conn, &created.session.id, &text("   ")).unwrap_err();
         assert_eq!(err.code, ErrorCode::InvalidInput);
         assert_eq!(session_entry_count(&conn, &created.session.id), 1);
@@ -576,8 +576,8 @@ mod tests {
     #[test]
     fn append_under_foreign_parent_is_rejected() {
         let conn = memory_db();
-        let a = sessions::create(&conn, "a", &text("root")).unwrap();
-        let b = sessions::create(&conn, "b", &text("root")).unwrap();
+        let a = sessions::create(&conn, "a", &text("root"), None).unwrap();
+        let b = sessions::create(&conn, "b", &text("root"), None).unwrap();
         let tx = conn.unchecked_transaction().unwrap();
         let now = now_utc(&tx).unwrap();
         let err = append_in_transaction(&tx, &a.session.id, Some(&b.entry.id), &text("x"), &now)
@@ -591,7 +591,7 @@ mod tests {
     #[test]
     fn set_active_leaf_moves_pointer_without_bumping_updated_at() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let sid = &created.session.id;
         append_chain(&conn, sid, 2);
         set_updated_at(&conn, sid, "2000-01-01T00:00:00.000Z");
@@ -606,8 +606,8 @@ mod tests {
     #[test]
     fn set_active_leaf_rejects_foreign_or_missing_targets() {
         let conn = memory_db();
-        let a = sessions::create(&conn, "a", &text("root")).unwrap();
-        let b = sessions::create(&conn, "b", &text("root")).unwrap();
+        let a = sessions::create(&conn, "a", &text("root"), None).unwrap();
+        let b = sessions::create(&conn, "b", &text("root"), None).unwrap();
         assert_eq!(
             set_active_leaf(&conn, &a.session.id, &b.entry.id).unwrap_err().code,
             ErrorCode::NotFound
@@ -622,7 +622,7 @@ mod tests {
     #[test]
     fn delete_non_active_branch_keeps_pointer() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let sid = &created.session.id;
         let chain = append_chain(&conn, sid, 2);
         let sibling = fork_child(&conn, sid, Some(&chain[0]), "sib");
@@ -639,7 +639,7 @@ mod tests {
     #[test]
     fn delete_active_leaf_moves_pointer_to_its_parent() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let sid = &created.session.id;
         let chain = append_chain(&conn, sid, 2);
 
@@ -652,7 +652,7 @@ mod tests {
     #[test]
     fn delete_ancestor_of_active_relocates_pointer_to_target_parent() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let sid = &created.session.id;
         let chain = append_chain(&conn, sid, 2);
 
@@ -666,7 +666,7 @@ mod tests {
     #[test]
     fn delete_root_leaves_empty_session_with_null_pointer() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let sid = &created.session.id;
         append_chain(&conn, sid, 2);
 
@@ -680,7 +680,7 @@ mod tests {
     #[test]
     fn delete_root_with_active_in_other_branch_keeps_pointer() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root-a")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root-a"), None).unwrap();
         let sid = &created.session.id;
         let chain = append_chain(&conn, sid, 1);
         let root_b = fork_child(&conn, sid, None, "root-b");
@@ -702,7 +702,7 @@ mod tests {
     #[test]
     fn delete_deep_subtree_beyond_trigger_recursion_limit() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let sid = &created.session.id;
         append_chain(&conn, sid, 1500);
 
@@ -719,7 +719,7 @@ mod tests {
     #[test]
     fn delete_failure_rolls_back_rows_and_pointer() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let sid = &created.session.id;
         let chain = append_chain(&conn, sid, 3);
         set_updated_at(&conn, sid, "2000-01-01T00:00:00.000Z");
@@ -750,8 +750,8 @@ mod tests {
     #[test]
     fn delete_entry_rejects_cross_session_target() {
         let conn = memory_db();
-        let a = sessions::create(&conn, "a", &text("root")).unwrap();
-        let b = sessions::create(&conn, "b", &text("root")).unwrap();
+        let a = sessions::create(&conn, "a", &text("root"), None).unwrap();
+        let b = sessions::create(&conn, "b", &text("root"), None).unwrap();
         assert_eq!(
             delete_entry(&conn, &b.session.id, &a.entry.id).unwrap_err().code,
             ErrorCode::NotFound
@@ -763,7 +763,7 @@ mod tests {
     #[test]
     fn multiple_roots_and_siblings_coexist_and_switch() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root-a")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root-a"), None).unwrap();
         let sid = &created.session.id;
         let chain_a = append_chain(&conn, sid, 1);
         let root_b = fork_child(&conn, sid, None, "root-b");
@@ -787,7 +787,7 @@ mod tests {
     #[test]
     fn tail_page_reports_boundaries() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let sid = &created.session.id;
         append_chain(&conn, sid, 4);
         let full = walk_active_path(&conn, sid);
@@ -808,7 +808,7 @@ mod tests {
     #[test]
     fn exactly_full_default_page_gets_prev_cursor_only_at_limit_plus_one() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let sid = &created.session.id;
         append_chain(&conn, sid, 49);
         let full = walk_active_path(&conn, sid);
@@ -828,7 +828,7 @@ mod tests {
     #[test]
     fn before_and_after_exclude_cursor_and_report_directions() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let sid = &created.session.id;
         append_chain(&conn, sid, 4);
         let full = walk_active_path(&conn, sid);
@@ -853,7 +853,7 @@ mod tests {
     #[test]
     fn empty_path_returns_empty_page() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let sid = &created.session.id;
         delete_entry(&conn, sid, &created.entry.id).unwrap();
 
@@ -866,8 +866,8 @@ mod tests {
     #[test]
     fn deleted_and_foreign_cursors_are_rejected() {
         let conn = memory_db();
-        let a = sessions::create(&conn, "a", &text("root")).unwrap();
-        let other = sessions::create(&conn, "b", &text("root")).unwrap();
+        let a = sessions::create(&conn, "a", &text("root"), None).unwrap();
+        let other = sessions::create(&conn, "b", &text("root"), None).unwrap();
         let sid = &a.session.id;
         let chain = append_chain(&conn, sid, 2);
 
@@ -908,7 +908,7 @@ mod tests {
     #[test]
     fn cursor_on_inactive_branch_is_rejected_after_switch() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let sid = &created.session.id;
         let chain = append_chain(&conn, sid, 2);
         let fork = fork_child(&conn, sid, Some(&chain[0]), "fork");
@@ -927,7 +927,7 @@ mod tests {
     #[test]
     fn limit_boundaries() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let sid = &created.session.id;
         append_chain(&conn, sid, 4);
         let full = walk_active_path(&conn, sid);
@@ -960,7 +960,7 @@ mod tests {
     #[test]
     fn path_pagination_round_trip_equals_full_walk_on_long_chain() {
         let conn = memory_db();
-        let created = sessions::create(&conn, "t", &text("root")).unwrap();
+        let created = sessions::create(&conn, "t", &text("root"), None).unwrap();
         let sid = &created.session.id;
         append_chain(&conn, sid, 1499);
         let full = walk_active_path(&conn, sid);

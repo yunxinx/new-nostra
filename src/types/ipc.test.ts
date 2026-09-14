@@ -394,6 +394,7 @@ describe("session and page mirrors", () => {
       session: {
         createdAt: "2026-09-09T00:00:00.000Z",
         id: "s1",
+        model: null,
         pinned: false,
         title: "hello",
         updatedAt: "2026-09-09T00:00:00.000Z",
@@ -407,6 +408,7 @@ describe("session and page mirrors", () => {
     const session: Session = {
       createdAt: "2026-09-09T00:00:00.000Z",
       id: "s1",
+      model: { kind: "provider", modelId: "m1", providerId: "p1" },
       pinned: false,
       title: "hello",
       updatedAt: "2026-09-09T00:00:00.000Z",

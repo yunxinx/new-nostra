@@ -1,6 +1,6 @@
 import type { QueryClient, QueryState } from "@tanstack/react-query";
 
-import type { Session } from "@/types/ipc";
+import type { Session, SessionModel } from "@/types/ipc";
 
 import { sessionsKeys } from "./query-keys";
 import {
@@ -8,14 +8,17 @@ import {
   removeSessionFromList,
   type SessionListData,
   updateSessionActivity,
+  updateSessionModel,
 } from "./session-list-cache";
 
-// A committed write affecting list membership or activity, e.g.
-// { kind: "delete", sessionId: "s42" }.
+// A committed write reaching the cached pages, e.g.
+// { kind: "delete", sessionId: "s42" } or
+// { kind: "model", sessionId: "s42", model: { kind: "unified", modelId: "fast" } }.
 type SessionListChange =
   | { kind: "append"; sessionId: string; updatedAt: string }
   | { kind: "create"; session: Session }
-  | { kind: "delete"; sessionId: string };
+  | { kind: "delete"; sessionId: string }
+  | { kind: "model"; model: null | SessionModel; sessionId: string };
 
 export async function updateSessionLists(
   queryClient: QueryClient,
@@ -72,6 +75,8 @@ function applyChange(
       return insertSessionInList(data, change.session);
     case "delete":
       return removeSessionFromList(data, change.sessionId);
+    case "model":
+      return updateSessionModel(data, change.sessionId, change.model);
   }
 }
 

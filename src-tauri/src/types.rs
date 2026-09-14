@@ -35,12 +35,25 @@ pub struct MessagePayload {
     pub content: Vec<ContentBlock>,
 }
 
+/// The model one conversation speaks to. The selection travels with the session
+/// and is never rewritten by a catalogue change: one that no longer resolves
+/// reads as no selection. Example: { "kind": "provider", "providerId": "p1", "modelId": "m1" }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "kind")]
+pub enum SessionModel {
+    /// A registered model, addressed by its provider and its request name.
+    Provider { model_id: String, provider_id: String },
+    /// A unified model, addressed by its aggregate name.
+    Unified { model_id: String },
+}
+
 /// A session row as returned by the repository.
 #[derive(Debug, Clone)]
 pub struct Session {
     pub id: String,
     pub title: String,
     pub pinned: bool,
+    pub model: Option<SessionModel>,
     pub created_at: String,
     pub updated_at: String,
 }
